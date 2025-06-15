@@ -27,6 +27,21 @@ async function connectToVoice(guild, textChannel) {
 
         log('Joining voice channel', { channelName: voiceChannel.name, channelId: voiceChannel.id });
 
+        // Check if there are users in the voice channel
+        const members = voiceChannel.members.filter(member => !member.user.bot);
+        log('Voice channel status', {
+            totalMembers: voiceChannel.members.size,
+            humanMembers: members.size,
+            memberNames: members.map(m => m.user.username)
+        });
+
+        if (members.size === 0) {
+            log('Warning: No users currently in voice channel');
+            if (textChannel) {
+                textChannel.send('⚠️ Starting wTed Radio, but no users are currently in the voice channel. Join the channel to hear the stream!').catch(console.error);
+            }
+        }
+
         const connection = joinVoiceChannel({
             channelId: voiceChannel.id,
             guildId: guild.id,
@@ -52,6 +67,39 @@ async function connectToVoice(guild, textChannel) {
                 from: oldState.status, 
                 to: newState.status 
             });
+            
+            // Handle autopaused state
+            if (newState.status === 'autopaused') {
+                log('Player autopaused - checking voice channel for users');
+                const voiceChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+                if (voiceChannel) {
+                    const members = voiceChannel.members.filter(member => !member.user.bot);
+                    log('Voice channel members', { 
+                        totalMembers: voiceChannel.members.size,
+                        humanMembers: members.size,
+                        memberNames: members.map(m => m.user.username)
+                    });
+                    
+                    if (members.size > 0) {
+                        log('Users found in channel, attempting to unpause');
+                        // Try to unpause the player
+                        player.unpause();
+                    } else {
+                        log('No users in voice channel, keeping paused');
+                        if (textChannel) {
+                            textChannel.send('⏸️ wTed Radio paused - no users in voice channel. Join the voice channel to resume!').catch(console.error);
+                        }
+                    }
+                }
+            }
+            
+            // Handle when player resumes
+            if (oldState.status === 'autopaused' && newState.status === 'playing') {
+                log('Player resumed from autopaused state');
+                if (textChannel) {
+                    textChannel.send('▶️ wTed Radio resumed - welcome back!').catch(console.error);
+                }
+            }
         });
 
         log('Creating audio resource', { streamUrl: STREAM_URL });
@@ -77,9 +125,12 @@ async function connectToVoice(guild, textChannel) {
         player.on('error', error => {
             log('Audio player error', { error: error.message, stack: error.stack });
             if (voiceManager.has(guild.id)) {
-                const { connection, subscription } = voiceManager.get(guild.id);
+                const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
                 if (subscription) {
                     subscription.unsubscribe();
+                }
+                if (voiceStateHandler) {
+                    guild.client.off('voiceStateUpdate', voiceStateHandler);
                 }
                 connection.destroy();
                 voiceManager.delete(guild.id);
@@ -92,9 +143,12 @@ async function connectToVoice(guild, textChannel) {
         connection.on('error', error => {
             log('Voice connection error', { error: error.message, stack: error.stack });
             if (voiceManager.has(guild.id)) {
-                const { connection, subscription } = voiceManager.get(guild.id);
+                const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
                 if (subscription) {
                     subscription.unsubscribe();
+                }
+                if (voiceStateHandler) {
+                    guild.client.off('voiceStateUpdate', voiceStateHandler);
                 }
                 connection.destroy();
                 voiceManager.delete(guild.id);
@@ -116,9 +170,12 @@ async function connectToVoice(guild, textChannel) {
         const timer = setTimeout(() => {
             log('Timer expired, disconnecting bot');
             if (voiceManager.has(guild.id)) {
-                const { connection, subscription } = voiceManager.get(guild.id);
+                const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
                 if (subscription) {
                     subscription.unsubscribe();
+                }
+                if (voiceStateHandler) {
+                    guild.client.off('voiceStateUpdate', voiceStateHandler);
                 }
                 connection.destroy();
                 voiceManager.delete(guild.id);
@@ -130,6 +187,53 @@ async function connectToVoice(guild, textChannel) {
 
         voiceManager.set(guild.id, { connection, player, timer, subscription });
         log('Voice manager entry created', { guildId: guild.id });
+
+        // Set up voice state update listener for this guild
+        const client = guild.client;
+        const voiceStateHandler = (oldState, newState) => {
+            // Only handle changes for our target voice channel
+            if (newState.channelId === VOICE_CHANNEL_ID || oldState.channelId === VOICE_CHANNEL_ID) {
+                // Don't handle bot state changes
+                if (newState.member.user.bot) return;
+                
+                log('Voice state change detected', {
+                    user: newState.member.user.username,
+                    oldChannel: oldState.channelId,
+                    newChannel: newState.channelId,
+                    action: newState.channelId === VOICE_CHANNEL_ID ? 'joined' : 'left'
+                });
+                
+                // Check current members in the voice channel
+                const voiceChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+                if (voiceChannel && voiceManager.has(guild.id)) {
+                    const members = voiceChannel.members.filter(member => !member.user.bot);
+                    log('Updated voice channel status', {
+                        humanMembers: members.size,
+                        memberNames: members.map(m => m.user.username)
+                    });
+                    
+                    const { player } = voiceManager.get(guild.id);
+                    
+                    if (members.size > 0 && player.state.status === 'autopaused') {
+                        log('Users joined, resuming player');
+                        player.unpause();
+                        if (textChannel) {
+                            textChannel.send('▶️ wTed Radio resumed - welcome back!').catch(console.error);
+                        }
+                    } else if (members.size === 0 && player.state.status === 'playing') {
+                        log('All users left, player will auto-pause');
+                        if (textChannel) {
+                            textChannel.send('⏸️ wTed Radio paused - no users in voice channel.').catch(console.error);
+                        }
+                    }
+                }
+            }
+        };
+        
+        client.on('voiceStateUpdate', voiceStateHandler);
+        
+        // Store the handler so we can remove it later
+        voiceManager.get(guild.id).voiceStateHandler = voiceStateHandler;
 
         // Send success message to text channel
         if (textChannel) {
@@ -261,10 +365,13 @@ module.exports = {
                 });
 
                 // Clean up resources
-                const { connection, timer, subscription } = voiceManager.get(guild.id);
+                const { connection, timer, subscription, voiceStateHandler } = voiceManager.get(guild.id);
                 clearTimeout(timer);
                 if (subscription) {
                     subscription.unsubscribe();
+                }
+                if (voiceStateHandler) {
+                    guild.client.off('voiceStateUpdate', voiceStateHandler);
                 }
                 connection.destroy();
                 voiceManager.delete(guild.id);
@@ -303,9 +410,12 @@ module.exports = {
                 const newTimer = setTimeout(() => {
                     log('Timer expired, disconnecting bot');
                     if (voiceManager.has(guild.id)) {
-                        const { connection, subscription } = voiceManager.get(guild.id);
+                        const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
                         if (subscription) {
                             subscription.unsubscribe();
+                        }
+                        if (voiceStateHandler) {
+                            guild.client.off('voiceStateUpdate', voiceStateHandler);
                         }
                         connection.destroy();
                         voiceManager.delete(guild.id);
