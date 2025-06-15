@@ -52,56 +52,12 @@ async function connectToVoice(guild, textChannel) {
 
         log('Voice connection established');
 
-        // Wait for connection to be ready and log detailed status
+        // Simple connection state logging without complex checks
         connection.on('stateChange', (oldState, newState) => {
             log('Connection state changed', { 
                 from: oldState.status, 
-                to: newState.status,
-                reason: newState.reason,
-                closeCode: newState.closeCode
+                to: newState.status
             });
-            
-            // Check if connection is ready
-            if (newState.status === 'ready') {
-                log('Connection is ready - bot should now be visible in voice channel');
-                // Double-check the voice channel members
-                setTimeout(() => {
-                    const currentChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
-                    if (currentChannel) {
-                        const botMember = currentChannel.members.find(member => member.user.bot && member.user.id === guild.client.user.id);
-                        log('Bot presence check', {
-                            botInChannel: !!botMember,
-                            totalChannelMembers: currentChannel.members.size,
-                            allMembers: currentChannel.members.map(m => ({ name: m.user.username, isBot: m.user.bot }))
-                        });
-                        
-                        // Check if bot is deafened or muted
-                        if (botMember) {
-                            log('Bot voice state', {
-                                deaf: botMember.voice.deaf,
-                                mute: botMember.voice.mute,
-                                selfDeaf: botMember.voice.selfDeaf,
-                                selfMute: botMember.voice.selfMute
-                            });
-                            
-                            // Try to undeafen/unmute if needed
-                            if (botMember.voice.selfDeaf || botMember.voice.selfMute) {
-                                log('Bot is deafened/muted, attempting to fix');
-                                try {
-                                    botMember.voice.setDeaf(false);
-                                    botMember.voice.setMute(false);
-                                    log('Successfully undeafened/unmuted bot');
-                                } catch (error) {
-                                    log('Failed to undeafen/unmute bot', { error: error.message });
-                                    if (textChannel) {
-                                        textChannel.send('⚠️ Bot is deafened in voice channel. Please right-click the bot and select "Undeafen" to hear audio.').catch(console.error);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }, 1000);
-            }
             
             // Handle connection failures
             if (newState.status === 'disconnected') {
@@ -221,14 +177,12 @@ async function connectToVoice(guild, textChannel) {
             }
         });
 
-        // Check bot permissions for the voice channel
+        // Check bot permissions for the voice channel (quick check)
         const botMember = guild.members.cache.get(guild.client.user.id);
         const permissions = voiceChannel.permissionsFor(botMember);
         log('Bot voice channel permissions', {
             connect: permissions.has('Connect'),
-            speak: permissions.has('Speak'),
-            useVAD: permissions.has('UseVAD'),
-            viewChannel: permissions.has('ViewChannel')
+            speak: permissions.has('Speak')
         });
 
         if (!permissions.has('Connect') || !permissions.has('Speak')) {
@@ -312,6 +266,20 @@ async function connectToVoice(guild, textChannel) {
         if (textChannel) {
             textChannel.send('🎵 wTed Radio is now live! Playing for 3 hours.').catch(console.error);
         }
+
+        // Check for deafen status after a delay (non-blocking)
+        setTimeout(() => {
+            const currentChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+            if (currentChannel) {
+                const botMember = currentChannel.members.find(member => member.user.bot && member.user.id === guild.client.user.id);
+                if (botMember && (botMember.voice.selfDeaf || botMember.voice.deaf)) {
+                    log('Bot is deafened in voice channel');
+                    if (textChannel) {
+                        textChannel.send('⚠️ Bot is deafened in voice channel. Right-click the bot and select "Undeafen" to hear audio.').catch(console.error);
+                    }
+                }
+            }
+        }, 3000);
 
         // Test the stream URL
         log('Testing stream URL accessibility');
