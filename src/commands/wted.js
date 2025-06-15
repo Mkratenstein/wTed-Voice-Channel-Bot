@@ -659,26 +659,24 @@ module.exports = {
 
         try {
             if (subcommand === 'play') {
-                // Check permissions FIRST before any Discord API calls
+                // IMMEDIATE response - absolutely first thing
+                await interaction.reply({ 
+                    content: '🔄 Starting wTed Radio...',
+                    flags: [4096] // MessageFlags.Ephemeral
+                });
+
+                // Check permissions AFTER response
                 if (!member.roles.cache.has(USER_ROLE_ID)) {
-                    return interaction.reply({ 
-                        content: '❌ You do not have the required role to use this command.',
-                        ephemeral: true
+                    return interaction.editReply({ 
+                        content: '❌ You do not have the required role to use this command.'
                     });
                 }
 
                 if (voiceManager.has(guild.id)) {
-                    return interaction.reply({ 
-                        content: '🎵 The bot is already playing!',
-                        ephemeral: true
+                    return interaction.editReply({ 
+                        content: '🎵 The bot is already playing!'
                     });
                 }
-
-                // IMMEDIATE response - absolutely first thing after checks
-                await interaction.reply({ 
-                    content: '🔄 Starting wTed Radio...',
-                    ephemeral: true
-                });
 
                 // Get text channel for updates (using test channel if provided)
                 const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
@@ -696,26 +694,24 @@ module.exports = {
                 });
 
             } else if (subcommand === 'end') {
-                // Check permissions FIRST before any Discord API calls
+                // IMMEDIATE response - absolutely first thing
+                await interaction.reply({ 
+                    content: '🛑 Stopping wTed Radio...',
+                    flags: [4096] // MessageFlags.Ephemeral
+                });
+
+                // Check permissions AFTER response
                 if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                    return interaction.reply({ 
-                        content: '❌ You do not have the required role to use this command.',
-                        ephemeral: true
+                    return interaction.editReply({ 
+                        content: '❌ You do not have the required role to use this command.'
                     });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.reply({ 
-                        content: '❌ The bot is not currently playing.',
-                        ephemeral: true
+                    return interaction.editReply({ 
+                        content: '❌ The bot is not currently playing.'
                     });
                 }
-
-                // IMMEDIATE response - absolutely first thing after checks
-                await interaction.reply({ 
-                    content: '🛑 Stopping wTed Radio...',
-                    ephemeral: true
-                });
 
                 // Perform cleanup asynchronously to avoid interaction timeouts
                 setImmediate(async () => {
@@ -741,26 +737,24 @@ module.exports = {
                 });
 
             } else if (subcommand === 'restart') {
-                // Check permissions FIRST before any Discord API calls
+                // IMMEDIATE response - absolutely first thing
+                await interaction.reply({ 
+                    content: '🔄 Restarting timer...',
+                    flags: [4096] // MessageFlags.Ephemeral
+                });
+
+                // Check permissions AFTER response
                 if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                    return interaction.reply({ 
-                        content: '❌ You do not have the required role to use this command.',
-                        ephemeral: true
+                    return interaction.editReply({ 
+                        content: '❌ You do not have the required role to use this command.'
                     });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.reply({ 
-                        content: '❌ The bot is not currently playing.',
-                        ephemeral: true
+                    return interaction.editReply({ 
+                        content: '❌ The bot is not currently playing.'
                     });
                 }
-
-                // IMMEDIATE response - absolutely first thing after checks
-                await interaction.reply({ 
-                    content: '🔄 Restarting timer...',
-                    ephemeral: true
-                });
 
                 // Restart the timer asynchronously
                 setImmediate(() => {
@@ -848,18 +842,11 @@ module.exports = {
         } catch (error) {
             log('Error in wted command', { error: error.message, stack: error.stack });
             
-            // Try to respond with error
+            // Always use editReply since we reply immediately at the start of each subcommand
             try {
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({ 
-                        content: '❌ An error occurred while executing this command.', 
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.editReply({ 
-                        content: '❌ An error occurred while executing this command.'
-                    });
-                }
+                await interaction.editReply({ 
+                    content: '❌ An error occurred while executing this command.'
+                });
             } catch (replyError) {
                 log('Error sending error message', { error: replyError.message });
             }
