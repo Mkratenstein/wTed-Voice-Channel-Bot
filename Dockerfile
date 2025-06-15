@@ -1,5 +1,8 @@
 FROM node:18-alpine
 
+# Explicitly set the Python path for node-gyp. This is a common fix for Alpine.
+ENV PYTHON=/usr/bin/python3
+
 # Install FFmpeg for audio and build-tools for native module compilation.
 # The .build-deps is a virtual package that lets us uninstall all build tools easily later.
 RUN apk add --no-cache ffmpeg && \
@@ -21,4 +24,4 @@ RUN apk del .build-deps
 COPY . .
 
 # Start the bot
-CMD ["npm", "start"] 
+CMD ["npm", "start"]
