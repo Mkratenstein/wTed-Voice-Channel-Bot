@@ -32,6 +32,10 @@ module.exports = {
     VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID,
     TEXT_CHANNEL_ID: process.env.TEXT_CHANNEL_ID,
     STREAM_URL: process.env.STREAM_URL,
-    // Use TEST_CHANNEL_ID if provided, otherwise fall back to TEXT_CHANNEL_ID
-    ACTIVE_TEXT_CHANNEL_ID: process.env.TEST_CHANNEL_ID || process.env.TEXT_CHANNEL_ID
-}; 
+    // FORCE TEST CHANNEL for testing - override with test channel ID
+    ACTIVE_TEXT_CHANNEL_ID: '1383827890696753162' // Test channel - hardcoded for testing
+};
+
+// Log which channel configuration is being used
+console.log(`[CONFIG] FORCED TEST MODE: All bot messages will go to test channel: 1383827890696753162`);
+console.log(`[CONFIG] Production channel (${process.env.TEXT_CHANNEL_ID}) will NOT receive messages during testing`); 

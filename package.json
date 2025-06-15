@@ -7,6 +7,7 @@
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js",
     "dev": "nodemon src/index.js",
+    "test-stream": "node src/test-stream.js",
     "postinstall": "npm run deploy"
   },
   "keywords": [
