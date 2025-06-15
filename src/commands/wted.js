@@ -50,12 +50,39 @@ async function connectToVoice(guild, textChannel) {
 
         log('Voice connection established');
 
-        // Wait for connection to be ready
+        // Wait for connection to be ready and log detailed status
         connection.on('stateChange', (oldState, newState) => {
             log('Connection state changed', { 
                 from: oldState.status, 
-                to: newState.status 
+                to: newState.status,
+                reason: newState.reason,
+                closeCode: newState.closeCode
             });
+            
+            // Check if connection is ready
+            if (newState.status === 'ready') {
+                log('Connection is ready - bot should now be visible in voice channel');
+                // Double-check the voice channel members
+                setTimeout(() => {
+                    const currentChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+                    if (currentChannel) {
+                        const botMember = currentChannel.members.find(member => member.user.bot && member.user.id === guild.client.user.id);
+                        log('Bot presence check', {
+                            botInChannel: !!botMember,
+                            totalChannelMembers: currentChannel.members.size,
+                            allMembers: currentChannel.members.map(m => ({ name: m.user.username, isBot: m.user.bot }))
+                        });
+                    }
+                }, 1000);
+            }
+            
+            // Handle connection failures
+            if (newState.status === 'disconnected') {
+                log('Connection disconnected', { reason: newState.reason });
+                if (textChannel) {
+                    textChannel.send('❌ Voice connection was disconnected. Please try again.').catch(console.error);
+                }
+            }
         });
 
         const player = createAudioPlayer();
@@ -102,26 +129,7 @@ async function connectToVoice(guild, textChannel) {
             }
         });
 
-        log('Creating audio resource', { streamUrl: STREAM_URL });
-        const resource = createAudioResource(STREAM_URL, {
-            inputType: 'arbitrary',
-            inlineVolume: true,
-            metadata: {
-                title: 'wTed Radio Stream'
-            }
-        });
-
-        log('Audio resource created successfully');
-
-        // Subscribe the connection to the player
-        const subscription = connection.subscribe(player);
-        log('Connection subscribed to player', { subscribed: !!subscription });
-
-        // Play the resource
-        player.play(resource);
-        log('Audio player started playing resource');
-
-        // Set up error handling
+        // Set up error handling for player
         player.on('error', error => {
             log('Audio player error', { error: error.message, stack: error.stack });
             if (voiceManager.has(guild.id)) {
@@ -140,6 +148,34 @@ async function connectToVoice(guild, textChannel) {
             }
         });
 
+        log('Creating audio resource', { streamUrl: STREAM_URL });
+        const resource = createAudioResource(STREAM_URL, {
+            inputType: 'arbitrary',
+            inlineVolume: true,
+            metadata: {
+                title: 'wTed Radio Stream'
+            }
+        });
+
+        log('Audio resource created successfully');
+
+        // Add resource error handling
+        resource.playStream.on('error', error => {
+            log('Stream error', { error: error.message, stack: error.stack });
+            if (textChannel) {
+                textChannel.send('❌ Stream encountered an error. Please check the stream URL.').catch(console.error);
+            }
+        });
+
+        // Subscribe the connection to the player
+        const subscription = connection.subscribe(player);
+        log('Connection subscribed to player', { subscribed: !!subscription });
+
+        // Play the resource
+        player.play(resource);
+        log('Audio player started playing resource');
+
+        // Set up error handling
         connection.on('error', error => {
             log('Voice connection error', { error: error.message, stack: error.stack });
             if (voiceManager.has(guild.id)) {
@@ -158,13 +194,23 @@ async function connectToVoice(guild, textChannel) {
             }
         });
 
-        // Add resource error handling
-        resource.playStream.on('error', error => {
-            log('Stream error', { error: error.message, stack: error.stack });
-            if (textChannel) {
-                textChannel.send('❌ Stream encountered an error. Please check the stream URL.').catch(console.error);
-            }
+        // Check bot permissions for the voice channel
+        const botMember = guild.members.cache.get(guild.client.user.id);
+        const permissions = voiceChannel.permissionsFor(botMember);
+        log('Bot voice channel permissions', {
+            connect: permissions.has('Connect'),
+            speak: permissions.has('Speak'),
+            useVAD: permissions.has('UseVAD'),
+            viewChannel: permissions.has('ViewChannel')
         });
+
+        if (!permissions.has('Connect') || !permissions.has('Speak')) {
+            log('ERROR: Bot lacks required voice permissions');
+            if (textChannel) {
+                textChannel.send('❌ Bot lacks required permissions to connect or speak in the voice channel!').catch(console.error);
+            }
+            return false;
+        }
 
         // Set up the timer
         const timer = setTimeout(() => {
