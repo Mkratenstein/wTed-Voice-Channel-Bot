@@ -17,9 +17,11 @@ COPY package*.json ./
 
 # Set environment variables for npm
 ENV npm_config_python=/usr/bin/python3
+ENV NODE_ENV=production
 
-# Install dependencies with specific flags
-RUN npm install --production --no-optional --no-audit --no-fund
+# Install dependencies with specific flags and verbose output
+RUN npm install --verbose \
+    && npm cache clean --force
 
 # Copy app source
 COPY . .
