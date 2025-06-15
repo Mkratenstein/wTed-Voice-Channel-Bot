@@ -4,6 +4,22 @@ const path = require('node:path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { deployCommands } = require('./deploy-commands');
 
+// Verify environment variables
+if (!process.env.DISCORD_TOKEN) {
+    console.error('DISCORD_TOKEN is not set in environment variables');
+    process.exit(1);
+}
+
+if (!process.env.CLIENT_ID) {
+    console.error('CLIENT_ID is not set in environment variables');
+    process.exit(1);
+}
+
+if (!process.env.GUILD_ID) {
+    console.error('GUILD_ID is not set in environment variables');
+    process.exit(1);
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -58,7 +74,17 @@ client.once('ready', async () => {
         console.log('Commands deployed successfully!');
     } catch (error) {
         console.error('Error deploying commands:', error);
+        // Don't exit the process, let the bot continue running
+        console.log('Continuing without command deployment...');
     }
 });
 
-client.login(process.env.DISCORD_TOKEN); 
+// Handle process errors
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+client.login(process.env.DISCORD_TOKEN).catch(error => {
+    console.error('Failed to login:', error);
+    process.exit(1);
+}); 

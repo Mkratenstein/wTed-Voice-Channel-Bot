@@ -58,9 +58,5 @@ RUN if [ $? -ne 0 ]; then \
 # Copy app source
 COPY . .
 
-# Deploy commands
-RUN echo "Deploying commands..." && \
-    npm run deploy
-
 # Start the bot
 CMD ["npm", "start"] 
