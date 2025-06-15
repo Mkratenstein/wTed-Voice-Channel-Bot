@@ -172,41 +172,222 @@ async function connectToVoice(guild, textChannel) {
         });
 
         log('Creating audio resource', { streamUrl: STREAM_URL });
-        const resource = createAudioResource(STREAM_URL, {
-            inputType: 'arbitrary',
-            inlineVolume: true,
-            metadata: {
-                title: 'wTed Radio Stream'
+        
+        // Test stream URL accessibility first
+        log('Testing stream URL accessibility before creating audio resource');
+        const https = require('https');
+        const http = require('http');
+        const url = require('url');
+        
+        try {
+            const parsedUrl = url.parse(STREAM_URL);
+            const protocol = parsedUrl.protocol === 'https:' ? https : http;
+            
+            const testReq = protocol.request(parsedUrl, (res) => {
+                log('Stream URL test response', { 
+                    statusCode: res.statusCode, 
+                    contentType: res.headers['content-type'],
+                    icyName: res.headers['icy-name'],
+                    icyGenre: res.headers['icy-genre'],
+                    icyBr: res.headers['icy-br']
+                });
+                
+                if (res.statusCode === 200) {
+                    log('Stream URL is accessible, proceeding with audio resource creation');
+                } else {
+                    log('Stream URL returned non-200 status', { statusCode: res.statusCode });
+                    if (textChannel) {
+                        textChannel.send(`⚠️ Stream URL returned status ${res.statusCode}. Audio may not work properly.`).catch(console.error);
+                    }
+                }
+                testReq.destroy();
+            });
+            
+            testReq.on('error', (error) => {
+                log('Stream URL test error', { error: error.message, code: error.code });
+                if (textChannel) {
+                    textChannel.send(`⚠️ Stream URL test failed: ${error.message}. Attempting to play anyway...`).catch(console.error);
+                }
+            });
+            
+            testReq.setTimeout(5000, () => {
+                log('Stream URL test timeout');
+                testReq.destroy();
+            });
+            
+            testReq.end();
+        } catch (error) {
+            log('Error testing stream URL', { error: error.message });
+        }
+        
+        // Try different stream options to handle various stream formats
+        let resource;
+        try {
+            // First attempt: Try with URL input type for HTTP streams
+            log('Attempting to create audio resource with URL input type');
+            resource = createAudioResource(STREAM_URL, {
+                inputType: 'url',
+                inlineVolume: true,
+                metadata: {
+                    title: 'wTed Radio Stream'
+                }
+            });
+            
+            log('Audio resource created with URL input type', {
+                readable: resource.readable,
+                volume: resource.volume ? 'present' : 'missing',
+                metadata: resource.metadata
+            });
+        } catch (error) {
+            log('Failed to create audio resource with URL input type, trying arbitrary', { error: error.message });
+            
+            try {
+                // Second attempt: Try with arbitrary input type
+                log('Attempting to create audio resource with arbitrary input type');
+                resource = createAudioResource(STREAM_URL, {
+                    inputType: 'arbitrary',
+                    inlineVolume: true,
+                    metadata: {
+                        title: 'wTed Radio Stream'
+                    }
+                });
+                
+                log('Audio resource created with arbitrary input type', {
+                    readable: resource.readable,
+                    volume: resource.volume ? 'present' : 'missing',
+                    metadata: resource.metadata
+                });
+            } catch (error2) {
+                log('Failed with arbitrary input type, trying with custom FFmpeg args', { error: error2.message });
+                
+                // Third attempt: Custom FFmpeg arguments for streaming
+                resource = createAudioResource(STREAM_URL, {
+                    inputType: 'arbitrary',
+                    inlineVolume: true,
+                    metadata: {
+                        title: 'wTed Radio Stream'
+                    },
+                    // Custom FFmpeg arguments for better stream handling
+                    inputArgs: [
+                        '-reconnect', '1',
+                        '-reconnect_streamed', '1',
+                        '-reconnect_delay_max', '5'
+                    ]
+                });
+                
+                log('Audio resource created with custom FFmpeg args', {
+                    readable: resource.readable,
+                    volume: resource.volume ? 'present' : 'missing',
+                    metadata: resource.metadata
+                });
             }
-        });
+        }
 
-        log('Audio resource created successfully', {
-            readable: resource.readable,
-            volume: resource.volume ? 'present' : 'missing',
-            metadata: resource.metadata
-        });
-
-        // Add detailed resource error handling
+        // Enhanced stream error handling with retry counter
         resource.playStream.on('error', error => {
-            log('Stream error', { error: error.message, stack: error.stack });
-            if (textChannel) {
-                textChannel.send('❌ Stream encountered an error. Please check the stream URL.').catch(console.error);
+            log('Stream error detected', { 
+                error: error.message, 
+                stack: error.stack,
+                code: error.code,
+                errno: error.errno
+            });
+            
+            if (voiceManager.has(guild.id)) {
+                const voiceData = voiceManager.get(guild.id);
+                voiceData.retryCount = (voiceData.retryCount || 0) + 1;
+                
+                log('Stream retry attempt', { 
+                    retryCount: voiceData.retryCount,
+                    maxRetries: 5
+                });
+                
+                if (voiceData.retryCount >= 5) {
+                    log('Maximum retry attempts reached, performing automatic cleanup');
+                    if (textChannel) {
+                        textChannel.send('❌ Stream failed after 5 retry attempts. Automatically ending wTed Radio session.').catch(console.error);
+                    }
+                    
+                    // Perform automatic cleanup (equivalent to /wted end)
+                    performCleanup(guild, 'max retries reached').then(() => {
+                        if (textChannel) {
+                            textChannel.send('🔄 wTed Radio session ended due to connection issues. Use `/wted play` to try again.').catch(console.error);
+                        }
+                    });
+                    return;
+                }
+                
+                if (textChannel) {
+                    textChannel.send(`❌ Stream error: ${error.message}. Attempting to reconnect... (${voiceData.retryCount}/5)`).catch(console.error);
+                }
+                
+                // Attempt to recreate the stream after a delay
+                setTimeout(() => {
+                    if (voiceManager.has(guild.id)) {
+                        log('Attempting to recreate stream after error', { retryAttempt: voiceData.retryCount });
+                        try {
+                            const newResource = createAudioResource(STREAM_URL, {
+                                inputType: 'arbitrary',
+                                inlineVolume: true,
+                                metadata: { title: 'wTed Radio Stream' }
+                            });
+                            
+                            const { player } = voiceManager.get(guild.id);
+                            player.play(newResource);
+                            log('Stream recreated successfully');
+                            
+                            // Reset retry counter on successful reconnection
+                            voiceManager.get(guild.id).retryCount = 0;
+                            
+                            if (textChannel) {
+                                textChannel.send('✅ Stream reconnected successfully!').catch(console.error);
+                            }
+                        } catch (recreateError) {
+                            log('Failed to recreate stream', { error: recreateError.message, retryAttempt: voiceData.retryCount });
+                            if (textChannel) {
+                                textChannel.send(`❌ Failed to reconnect stream (attempt ${voiceData.retryCount}/5).`).catch(console.error);
+                            }
+                        }
+                    }
+                }, 3000);
             }
         });
 
-        // Monitor stream events (async, non-blocking)
+        // Enhanced stream event monitoring
         setImmediate(() => {
             resource.playStream.on('end', () => {
-                log('Stream ended');
+                log('Stream ended - this may indicate stream disconnection');
+                if (textChannel) {
+                    textChannel.send('⚠️ Stream ended unexpectedly. Checking connection...').catch(console.error);
+                }
             });
 
             resource.playStream.on('close', () => {
-                log('Stream closed');
+                log('Stream closed - connection terminated');
+                if (textChannel) {
+                    textChannel.send('⚠️ Stream connection closed. Use `/wted play` to reconnect.').catch(console.error);
+                }
             });
 
             resource.playStream.on('readable', () => {
-                log('Stream is readable');
+                log('Stream is readable - data available');
             });
+            
+            resource.playStream.on('data', (chunk) => {
+                log('Stream data received', { chunkSize: chunk.length });
+            });
+            
+            // Monitor for stream timeout
+            let streamTimeout = setTimeout(() => {
+                if (resource.playStream.readable) {
+                    log('Stream appears to be working - timeout cleared');
+                    clearTimeout(streamTimeout);
+                } else {
+                    log('Stream timeout - no data received within 10 seconds');
+                    if (textChannel) {
+                        textChannel.send('⚠️ Stream timeout - no audio data received. Please check stream URL.').catch(console.error);
+                    }
+                }
+            }, 10000);
         });
 
         // Subscribe the connection to the player
@@ -375,8 +556,8 @@ async function connectToVoice(guild, textChannel) {
         
         client.on('voiceStateUpdate', voiceStateHandler);
         
-        // Store all data in voice manager including the handler
-        voiceManager.set(guild.id, { connection, player, timer, subscription, voiceStateHandler });
+        // Store all data in voice manager including the handler and retry counter
+        voiceManager.set(guild.id, { connection, player, timer, subscription, voiceStateHandler, retryCount: 0 });
         log('Voice manager entry created', { guildId: guild.id });
 
         // Send success message to text channel
@@ -444,6 +625,55 @@ async function connectToVoice(guild, textChannel) {
         }
         return false;
     }
+}
+
+// Helper function to perform complete cleanup (equivalent to /wted end)
+async function performCleanup(guild, reason = 'cleanup') {
+    log(`Performing cleanup for guild ${guild.id}`, { reason });
+    
+    if (voiceManager.has(guild.id)) {
+        const { connection, subscription, voiceStateHandler, player, timer } = voiceManager.get(guild.id);
+        
+        log('Starting cleanup process');
+        
+        // Clear timer
+        if (timer) {
+            clearTimeout(timer);
+            log('Timer cleared');
+        }
+        
+        // Stop the player
+        if (player) {
+            player.stop();
+            log('Player stopped');
+        }
+        
+        // Clean up subscription
+        if (subscription) {
+            subscription.unsubscribe();
+            log('Subscription cleaned up');
+        }
+        
+        // Remove voice state handler
+        if (voiceStateHandler) {
+            guild.client.off('voiceStateUpdate', voiceStateHandler);
+            log('Voice state handler removed');
+        }
+        
+        // Destroy connection (this removes bot from voice channel)
+        if (connection) {
+            connection.destroy();
+            log('Voice connection destroyed - bot should leave channel');
+        }
+        
+        // Clean up voice manager
+        voiceManager.delete(guild.id);
+        log('Voice manager cleaned up');
+        
+        return true;
+    }
+    
+    return false;
 }
 
 module.exports = {
@@ -535,56 +765,25 @@ module.exports = {
                 });
 
                 // Perform cleanup asynchronously to avoid interaction timeouts
-                setImmediate(() => {
+                setImmediate(async () => {
                     try {
                         log('Starting cleanup process for /wted end');
                         
-                        const { connection, timer, subscription, voiceStateHandler, player } = voiceManager.get(guild.id);
+                        const success = await performCleanup(guild, 'manual end command');
                         
-                        // Stop the timer
-                        if (timer) {
-                            clearTimeout(timer);
-                            log('Timer cleared');
+                        if (success) {
+                            // Send confirmation to text channel
+                            const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                            if (textChannel) {
+                                textChannel.send('🛑 wTed Radio has been stopped by an admin.').catch(console.error);
+                            }
+                            log('Manual cleanup completed successfully');
+                        } else {
+                            log('No active session found to clean up');
                         }
-                        
-                        // Stop the audio player
-                        if (player) {
-                            player.stop();
-                            log('Audio player stopped');
-                        }
-                        
-                        // Unsubscribe from the connection
-                        if (subscription) {
-                            subscription.unsubscribe();
-                            log('Subscription unsubscribed');
-                        }
-                        
-                        // Remove voice state handler
-                        if (voiceStateHandler) {
-                            guild.client.off('voiceStateUpdate', voiceStateHandler);
-                            log('Voice state handler removed');
-                        }
-                        
-                        // Destroy the voice connection (this removes bot from channel)
-                        if (connection) {
-                            connection.destroy();
-                            log('Voice connection destroyed');
-                        }
-                        
-                        // Remove from voice manager
-                        voiceManager.delete(guild.id);
-                        log('Removed from voice manager');
-
-                        // Send confirmation to text channel
-                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
-                        if (textChannel) {
-                            textChannel.send('🛑 wTed Radio has been stopped by an admin.').catch(console.error);
-                        }
-                        
-                        log('Cleanup process completed successfully');
                         
                     } catch (error) {
-                        log('Error during cleanup', { error: error.message, stack: error.stack });
+                        log('Error during manual cleanup', { error: error.message, stack: error.stack });
                         const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
                         if (textChannel) {
                             textChannel.send('⚠️ Error occurred while stopping. Bot may need manual disconnect.').catch(console.error);
