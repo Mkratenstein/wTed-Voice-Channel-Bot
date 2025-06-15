@@ -15,8 +15,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Set npm config
-RUN npm config set python /usr/bin/python3
+# Set environment variables for npm
+ENV npm_config_python=/usr/bin/python3
 
 # Install dependencies with specific flags
 RUN npm install --production --no-optional --no-audit --no-fund
