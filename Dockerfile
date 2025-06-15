@@ -1,5 +1,8 @@
 FROM node:18-alpine
 
+# Install FFmpeg for audio processing
+RUN apk add --no-cache ffmpeg
+
 # Create app directory
 WORKDIR /app
 
