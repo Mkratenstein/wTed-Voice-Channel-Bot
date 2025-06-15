@@ -58,20 +58,22 @@ client.on('interactionCreate', async interaction => {
         
         // Set a timeout for the command execution
         const timeout = setTimeout(() => {
-            if (!interaction.replied) {
-                interaction.reply({ content: 'Command execution timed out. Please try again.', flags: [4096] }).catch(console.error);
+            if (!interaction.replied && !interaction.deferred) {
+                interaction.reply({ content: 'Command execution timed out. Please try again.', ephemeral: true }).catch(console.error);
             }
-        }, 3000);
+        }, 2500);
 
         await command.execute(interaction);
         clearTimeout(timeout);
     } catch (error) {
         console.error(`Error executing command ${interaction.commandName}:`, error);
         try {
-            if (!interaction.replied) {
-                await interaction.reply({ content: 'There was an error while executing this command!', flags: [4096] });
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+            } else if (interaction.deferred) {
+                await interaction.editReply({ content: 'There was an error while executing this command!' });
             } else {
-                await interaction.followUp({ content: 'There was an error while executing this command!', flags: [4096] });
+                await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
             }
         } catch (replyError) {
             console.error('Error sending error message:', replyError);

@@ -44,6 +44,16 @@ async function connectToVoice(guild, textChannel) {
     try {
         log('Starting voice connection process');
         
+        // Safety check - ensure we have a valid guild and client
+        if (!guild || !guild.client || !guild.client.user) {
+            throw new Error('Bot is not ready or guild is invalid');
+        }
+        
+        // Additional safety check - ensure bot is fully ready
+        if (!guild.client.isReady()) {
+            throw new Error('Bot is not fully ready yet');
+        }
+        
         const voiceChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
         if (!voiceChannel || !voiceChannel.isVoiceBased()) {
             throw new Error('Voice channel not found or invalid');
@@ -188,38 +198,43 @@ async function connectToVoice(guild, textChannel) {
         let resource;
         let resourceCreationMethod = 'node-stream-pipe';
 
-        try {
-            const stream = await new Promise((resolve, reject) => {
-                const request = https.get(STREAM_URL, (response) => {
-                    // Handle redirects
-                    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                        log('Stream redirected', { from: STREAM_URL, to: response.headers.location });
-                        https.get(response.headers.location, (redirectedResponse) => {
-                            if (redirectedResponse.statusCode === 200) {
-                                resolve(redirectedResponse);
-                            } else {
-                                redirectedResponse.resume(); // Consume data to free up memory
-                                reject(new Error(`Redirect failed with status code: ${redirectedResponse.statusCode}`));
-                            }
-                        }).on('error', reject);
-                    } else if (response.statusCode === 200) {
-                        resolve(response);
-                    } else {
-                        response.resume(); // Consume data to free up memory
-                        reject(new Error(`Request failed with status code: ${response.statusCode}`));
-                    }
-                });
-                
-                request.on('error', (error) => {
-                    log('Node.js stream request error', { error: error.message });
-                    reject(error);
-                });
+                try {
+            const stream = await Promise.race([
+                new Promise((resolve, reject) => {
+                    const request = https.get(STREAM_URL, (response) => {
+                        // Handle redirects
+                        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                            log('Stream redirected', { from: STREAM_URL, to: response.headers.location });
+                            https.get(response.headers.location, (redirectedResponse) => {
+                                if (redirectedResponse.statusCode === 200) {
+                                    resolve(redirectedResponse);
+                                } else {
+                                    redirectedResponse.resume(); // Consume data to free up memory
+                                    reject(new Error(`Redirect failed with status code: ${redirectedResponse.statusCode}`));
+                                }
+                            }).on('error', reject);
+                        } else if (response.statusCode === 200) {
+                            resolve(response);
+                        } else {
+                            response.resume(); // Consume data to free up memory
+                            reject(new Error(`Request failed with status code: ${response.statusCode}`));
+                        }
+                    });
+                    
+                    request.on('error', (error) => {
+                        log('Node.js stream request error', { error: error.message });
+                        reject(error);
+                    });
 
-                request.setTimeout(15000, () => {
-                    request.destroy();
-                    reject(new Error('Request timed out after 15 seconds'));
-                });
-            });
+                    request.setTimeout(15000, () => {
+                        request.destroy();
+                        reject(new Error('Request timed out after 15 seconds'));
+                    });
+                }),
+                new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Stream connection timeout after 10 seconds')), 10000);
+                })
+            ]);
 
             resource = createAudioResource(stream, {
                 inputType: 'arbitrary',

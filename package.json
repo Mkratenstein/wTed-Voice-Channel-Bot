@@ -8,8 +8,7 @@
     "deploy": "node src/deploy-commands.js",
     "dev": "nodemon src/index.js",
     "test-stream": "node src/test-stream.js",
-    "test-node-stream": "node src/test-node-stream.js",
-    "postinstall": "npm run deploy"
+    "test-node-stream": "node src/test-node-stream.js"
   },
   "keywords": [
     "discord",

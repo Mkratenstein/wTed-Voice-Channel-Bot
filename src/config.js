@@ -33,7 +33,7 @@ module.exports = {
     TEXT_CHANNEL_ID: process.env.TEXT_CHANNEL_ID,
     STREAM_URL: process.env.STREAM_URL,
     // TESTING MODE - disable Discord messages to focus on audio debugging
-    ACTIVE_TEXT_CHANNEL_ID: null, // Disable Discord messages during testing
+    ACTIVE_TEXT_CHANNEL_ID: process.env.TEST_CHANNEL_ID || process.env.TEXT_CHANNEL_ID, // Use test channel if available, otherwise main channel
     TESTING_MODE: true // Enable testing mode
 };
 
