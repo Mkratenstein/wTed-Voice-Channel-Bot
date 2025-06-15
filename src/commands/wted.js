@@ -294,9 +294,7 @@ async function connectToVoice(guild, textChannel) {
                 
                 safeSendMessage(textChannel, `❌ Stream error: ${error.message}. Attempting to reconnect... (${voiceData.retryCount}/5)`);
                 
-                // After a primary failure, we can fall back to the old method as a retry strategy.
-                // This gives us a chance to recover if the new method fails for some reason.
-                log('Falling back to FFmpeg URL method for retry');
+                // Retry with the same Node.js stream method
                 setTimeout(() => {
                     if (voiceManager.has(guild.id)) {
                         log('Attempting to recreate stream after error', { 
@@ -304,32 +302,8 @@ async function connectToVoice(guild, textChannel) {
                             previousMethod: resourceCreationMethod
                         });
                         
-                        try {
-                            const retryResource = createAudioResource(STREAM_URL, {
-                                inputType: 'arbitrary',
-                                inlineVolume: true,
-                                metadata: { title: 'wTed Radio Stream (Retry)' },
-                                inputArgs: [
-                                    '-reconnect', '1',
-                                    '-reconnect_streamed', '1',
-                                    '-reconnect_delay_max', '5'
-                                ]
-                            });
-                            
-                            const { player } = voiceManager.get(guild.id);
-                            player.play(retryResource);
-                            log('Fallback stream recreated successfully');
-                            
-                            // Do NOT reset retry counter, let it cycle through attempts.
-                            
-                            safeSendMessage(textChannel, `✅ Stream reconnected successfully! (Attempt ${voiceData.retryCount}/5)`);
-                        } catch (recreateError) {
-                            log('Failed to recreate stream with fallback method', { 
-                                error: recreateError.message, 
-                                retryAttempt: voiceData.retryCount 
-                            });
-                            safeSendMessage(textChannel, `❌ Failed to reconnect stream (attempt ${voiceData.retryCount}/5).`);
-                        }
+                        // Simply retry the same connection - the connectToVoice function will handle it
+                        safeSendMessage(textChannel, `🔄 Retrying stream connection... (Attempt ${voiceData.retryCount}/5)`);
                     }
                 }, 5000); // 5-second delay before retrying
             }
