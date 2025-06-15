@@ -101,7 +101,7 @@ async function connectAndPlay(guild) {
         await safeSendMessage(client, '📻 Accessing wTed Radio stream...');
         const resource = await createVerifiedAudioResource();
         log('Audio stream verified successfully.');
-        await safeSendMessage(client, '✅ Stream verified. Connecting to voice channel...');
+        await safeSendMessage(client, '✅ Stream verified. Connecting to voice...');
 
         // 2. Join the voice channel
         connection = joinVoiceChannel({
@@ -111,7 +111,12 @@ async function connectAndPlay(guild) {
         });
 
         // Store connection immediately to prevent race conditions
-        voiceManager.set(guild.id, { connection, player: null, subscription: null });
+        voiceManager.set(guild.id, {
+            connection,
+            player: null,
+            subscription: null,
+            intentionalDisconnect: false
+        });
 
         // 3. Set up connection state handling
         connection.on(VoiceConnectionStatus.Ready, () => {
@@ -129,8 +134,8 @@ async function connectAndPlay(guild) {
                 // Connection recovered
             } catch (error) {
                 log('Connection could not be recovered, destroying connection.');
-                await safeSendMessage(client, '⚠️ Connection lost. Could not reconnect.');
-                disconnect(guild);
+                await safeSendMessage(client, '⚠️ Connection lost. Could not reconnect automatically.');
+                disconnect(guild, true); // Mark as intentional to prevent auto-reconnect
             }
         });
 
@@ -146,20 +151,33 @@ async function connectAndPlay(guild) {
         
         player.on(AudioPlayerStatus.Playing, () => {
             log('Audio player is now in Playing status.');
-            safeSendMessage(client, '🎶 Now playing wTed Radio! Enjoy the tunes. The bot will auto-disconnect after 3 hours.');
+            safeSendMessage(client, '🎶 **Now playing wTed Radio!** Enjoy the tunes.');
         });
 
         player.on(AudioPlayerStatus.Idle, () => {
-            log('Audio player is Idle. This should not happen with a live stream. Attempting to reconnect.');
-            safeSendMessage(client, '⚠️ Stream became idle. Attempting to reconnect...');
-            disconnect(guild);
-            // Optional: add a retry mechanism here
+            const session = voiceManager.get(guild.id);
+            if (session && !session.intentionalDisconnect) {
+                log('Audio player is Idle. This should not happen with a live stream. Attempting to reconnect.');
+                safeSendMessage(client, '⚠️ Stream interrupted. Attempting to reconnect...');
+                
+                // Disconnect gracefully but don't immediately give up.
+                disconnect(guild, false); // Pass false to allow potential reconnect
+                setTimeout(() => {
+                    log('Retrying connection...');
+                    connectAndPlay(guild).catch(err => {
+                        log('Reconnect failed', { error: err.message });
+                        safeSendMessage(client, '❌ **Reconnect failed.** Please try starting the bot again with `/wted play`.');
+                    });
+                }, 5000); // 5-second delay before reconnecting
+            } else {
+                log('Audio player is Idle due to an intentional disconnect. Not reconnecting.');
+            }
         });
 
         player.on('error', error => {
             log('Audio player error', { error: error.message });
             safeSendMessage(client, '🔥 An error occurred with the audio player. The bot will disconnect.');
-            disconnect(guild);
+            disconnect(guild, true); // Mark as intentional
         });
 
         // 5. Play the resource
@@ -168,7 +186,7 @@ async function connectAndPlay(guild) {
 
     } catch (error) {
         log('Error in connectAndPlay', { error: error.message, stack: error.stack });
-        await safeSendMessage(client, `❌ Failed to start radio: ${error.message}`);
+        await safeSendMessage(client, `❌ **Failed to start radio:** ${error.message}`);
         if (connection) {
             connection.destroy();
         }
@@ -179,12 +197,17 @@ async function connectAndPlay(guild) {
 /**
  * Disconnects from the voice channel and cleans up resources.
  * @param {import('discord.js').Guild} guild The guild to disconnect from.
+ * @param {boolean} intentional - Whether the disconnect is intentional.
  */
-function disconnect(guild) {
+function disconnect(guild, intentional = false) {
     const session = voiceManager.get(guild.id);
     if (!session) {
         log('Disconnect called but no active session found.');
         return;
+    }
+
+    if (intentional) {
+        session.intentionalDisconnect = true;
     }
 
     const { connection, player, subscription } = session;

@@ -26,18 +26,11 @@ module.exports = {
         
         log(`Command received: /wted ${subcommand}`, { user: member.user.tag, guild: guild.name });
 
-        try {
-            // Use ephemeral reply to acknowledge the command immediately
-            await interaction.reply({ content: 'Processing your request...', flags: MessageFlags.Ephemeral });
-        } catch (replyError) {
-            log('Failed to send initial reply. The interaction may have already timed out or been deleted.', { error: replyError.message });
-            // If we can't reply, we can't do anything else.
-            return;
-        }
+        // Defer the reply to avoid timeout, and make it public.
+        await interaction.deferReply({ ephemeral: false });
 
         try {
             if (subcommand === 'play') {
-                // Permission Check
                 if (!member.roles.cache.has(config.USER_ROLE_ID)) {
                     log('Permission denied for /wted play', { userId: member.id });
                     return interaction.editReply({ content: '❌ You do not have the required role to use this command.' });
@@ -47,55 +40,47 @@ module.exports = {
                     return interaction.editReply({ content: '🎵 The bot is already playing!' });
                 }
 
-                await interaction.editReply({ content: '✅ Request received! Starting wTed Radio...' });
-                
-                // Don't await this; let it run in the background
-                connectAndPlay(guild);
+                await interaction.editReply({ content: `▶️ **${member.displayName}** started wTed Radio!` });
+                connectAndPlay(guild); // Runs in the background
 
             } else if (subcommand === 'end') {
-                // Permission Check
                 if (!member.roles.cache.has(config.ADMIN_ROLE_ID)) {
                     log('Permission denied for /wted end', { userId: member.id });
                     return interaction.editReply({ content: '❌ You do not have the required role to use this command (Admin only).' });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.editReply({ content: '❌ The bot is not currently playing.' });
+                    return interaction.editReply({ content: '🔇 The bot is not currently in a voice channel.' });
                 }
                 
-                await interaction.editReply({ content: '✅ Request received! Stopping the bot...' });
-                await safeSendMessage(client, '🛑 wTed Radio is being shut down by an admin.');
-                disconnect(guild);
+                disconnect(interaction.guild, true); // Mark as an intentional disconnect
+                await interaction.editReply({ content: `⏹️ **${member.displayName}** stopped the radio.` });
 
             } else if (subcommand === 'restart') {
-                // Permission Check
                 if (!member.roles.cache.has(config.ADMIN_ROLE_ID)) {
                     log('Permission denied for /wted restart', { userId: member.id });
                     return interaction.editReply({ content: '❌ You do not have the required role to use this command (Admin only).' });
                 }
                 
-                await interaction.editReply({ content: '✅ Request received! Restarting the bot...' });
+                await interaction.editReply({ content: `🔄 **${member.displayName}** is restarting the radio...` });
 
                 if (voiceManager.has(guild.id)) {
-                    await safeSendMessage(client, '🔄 Restarting the wTed Radio stream as requested by an admin.');
-                    log('Restarting: Disconnecting first...');
-                    disconnect(guild);
-                } else {
-                     await safeSendMessage(client, '🔄 Starting the wTed Radio stream as requested by an admin.');
+                    disconnect(guild, false); // Not fully intentional, we want it to come back
                 }
                 
-                // Wait a moment before reconnecting to ensure full disconnect
+                // Wait a moment for full disconnect before reconnecting
                 setTimeout(() => {
                     log('Restarting: Reconnecting...');
-                    connectAndPlay(guild);
+                    connectAndPlay(guild).catch(err => {
+                        log('Restart command failed during reconnect', { error: err.message });
+                        safeSendMessage(client, '❌ Restart failed. Please use `/wted play` to start the bot.');
+                    });
                 }, 2000);
             }
         } catch (error) {
             log('An error occurred during command execution.', { error: error.message, stack: error.stack });
-            // Don't try to reply again if the initial reply failed.
-            if (!interaction.replied && !interaction.deferred) {
-                // This block should ideally not be reached if the above check is solid.
-                return;
+            if (!interaction.replied) {
+                return; // Can't do anything if we haven't replied
             }
             try {
                 await interaction.editReply({ content: '🔥 An unexpected error occurred. Please check the logs.' });
