@@ -5,6 +5,10 @@ const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { deployCommands } = require('./deploy-commands');
 const { DISCORD_TOKEN } = require('./config');
 
+console.log('🚀 Starting wTed Radio Bot...');
+console.log('📦 Node.js version:', process.version);
+console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
+
 // Verify environment variables
 if (!process.env.DISCORD_TOKEN) {
     console.error('DISCORD_TOKEN is not set in environment variables');

@@ -4,11 +4,7 @@
   "description": "A Discord bot that plays a radio stream in a voice channel.",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "deploy": "node src/deploy-commands.js",
-    "dev": "nodemon src/index.js",
-    "test-stream": "node src/test-stream.js",
-    "test-node-stream": "node src/test-node-stream.js"
+    "start": "node src/index.js"
   },
   "keywords": [
     "discord",
