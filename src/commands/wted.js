@@ -1,19 +1,18 @@
-const { SlashCommandBuilder } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
+const { SlashCommandBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { 
+    joinVoiceChannel, 
+    createAudioPlayer, 
+    createAudioResource, 
+    AudioPlayerStatus, 
+    VoiceConnectionStatus,
+    getVoiceConnection
+} = require('@discordjs/voice');
+const https = require('https');
 const { GUILD_ID, USER_ROLE_ID, ADMIN_ROLE_ID, VOICE_CHANNEL_ID, TEXT_CHANNEL_ID, ACTIVE_TEXT_CHANNEL_ID, STREAM_URL, TESTING_MODE } = require('../config');
+const { log } = require('../utils/log');
 
 // Store active connections and timers
 const voiceManager = new Map();
-
-// Enhanced logging function
-function log(message, data = null) {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] ${message}`;
-    console.log(logMessage);
-    if (data) {
-        console.log(JSON.stringify(data, null, 2));
-    }
-}
 
 // Safe Discord message sending function for testing
 function safeSendMessage(textChannel, message) {
@@ -172,150 +171,67 @@ async function connectToVoice(guild, textChannel) {
                 
                 voiceManager.delete(guild.id);
             }
-            if (textChannel) {
-                textChannel.send('❌ Audio player encountered an error and stopped.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '❌ Audio player encountered an error and stopped.');
         });
 
-        log('Creating audio resource', { streamUrl: STREAM_URL });
-        
-        // Enhanced stream URL testing with detailed diagnostics
-        log('Testing stream URL accessibility and format');
-        const https = require('https');
-        const http = require('http');
-        const url = require('url');
-        
-        let streamInfo = null;
+        log('Creating audio resource by piping stream from Node.js');
+
+        let resource;
+        let resourceCreationMethod = 'node-stream-pipe';
+
         try {
-            const parsedUrl = url.parse(STREAM_URL);
-            const protocol = parsedUrl.protocol === 'https:' ? https : http;
-            
-            // Create a promise for the stream test
-            const streamTest = new Promise((resolve, reject) => {
-                const testReq = protocol.request(parsedUrl, (res) => {
-                    const info = {
-                        statusCode: res.statusCode,
-                        contentType: res.headers['content-type'],
-                        icyName: res.headers['icy-name'],
-                        icyGenre: res.headers['icy-genre'],
-                        icyBr: res.headers['icy-br'],
-                        icyMetaint: res.headers['icy-metaint'],
-                        server: res.headers['server'],
-                        connection: res.headers['connection']
-                    };
-                    
-                    log('Stream URL detailed response', info);
-                    
-                    if (res.statusCode === 200) {
-                        log('Stream URL is accessible and responding correctly');
-                        resolve(info);
+            const stream = await new Promise((resolve, reject) => {
+                const request = https.get(STREAM_URL, (response) => {
+                    // Handle redirects
+                    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                        log('Stream redirected', { from: STREAM_URL, to: response.headers.location });
+                        https.get(response.headers.location, (redirectedResponse) => {
+                            if (redirectedResponse.statusCode === 200) {
+                                resolve(redirectedResponse);
+                            } else {
+                                redirectedResponse.resume(); // Consume data to free up memory
+                                reject(new Error(`Redirect failed with status code: ${redirectedResponse.statusCode}`));
+                            }
+                        }).on('error', reject);
+                    } else if (response.statusCode === 200) {
+                        resolve(response);
                     } else {
-                        log('Stream URL returned non-200 status', { statusCode: res.statusCode });
-                        reject(new Error(`HTTP ${res.statusCode}`));
+                        response.resume(); // Consume data to free up memory
+                        reject(new Error(`Request failed with status code: ${response.statusCode}`));
                     }
-                    testReq.destroy();
                 });
                 
-                testReq.on('error', (error) => {
-                    log('Stream URL test error', { error: error.message, code: error.code });
+                request.on('error', (error) => {
+                    log('Node.js stream request error', { error: error.message });
                     reject(error);
                 });
-                
-                testReq.setTimeout(10000, () => {
-                    log('Stream URL test timeout');
-                    testReq.destroy();
-                    reject(new Error('Connection timeout'));
-                });
-                
-                testReq.end();
-            });
-            
-            // Wait for stream test (but don't block if it fails)
-            try {
-                streamInfo = await streamTest;
-            } catch (testError) {
-                log('Stream test failed, but continuing anyway', { error: testError.message });
-                if (textChannel) {
-                    textChannel.send(`⚠️ Stream test failed: ${testError.message}. Attempting to play anyway...`).catch(console.error);
-                }
-            }
-        } catch (error) {
-            log('Error during stream URL testing', { error: error.message });
-        }
-        
-        // Create audio resource with radio-optimized settings
-        let resource;
-        let resourceCreationMethod = 'unknown';
-        
-        try {
-            log('Creating audio resource with radio-optimized settings');
-            
-            // Method 1: Try with minimal FFmpeg arguments (most compatible)
-            try {
-                log('Attempt 1: Creating resource with minimal FFmpeg args for maximum compatibility');
-                resource = createAudioResource(STREAM_URL, {
-                    inputType: 'arbitrary',
-                    inlineVolume: true,
-                    metadata: {
-                        title: 'wTed Radio Stream',
-                        url: STREAM_URL
-                    },
-                    // Minimal FFmpeg arguments for radio streams
-                    inputArgs: [
-                        '-reconnect', '1',
-                        '-reconnect_streamed', '1'
-                    ]
-                });
-                resourceCreationMethod = 'minimal-ffmpeg';
-                log('Audio resource created successfully with minimal FFmpeg settings');
-            } catch (error1) {
-                log('Radio-optimized creation failed, trying basic URL method', { error: error1.message });
-                
-                // Method 2: Try basic URL input type
-                try {
-                    log('Attempt 2: Creating resource with URL input type');
-                    resource = createAudioResource(STREAM_URL, {
-                        inputType: 'url',
-                        inlineVolume: true,
-                        metadata: {
-                            title: 'wTed Radio Stream'
-                        }
-                    });
-                    resourceCreationMethod = 'url-input';
-                    log('Audio resource created successfully with URL input type');
-                } catch (error2) {
-                    log('URL input creation failed, trying arbitrary with minimal args', { error: error2.message });
-                    
-                    // Method 3: Minimal arbitrary input
-                    resource = createAudioResource(STREAM_URL, {
-                        inputType: 'arbitrary',
-                        inlineVolume: true,
-                        metadata: {
-                            title: 'wTed Radio Stream'
-                        }
-                    });
-                    resourceCreationMethod = 'arbitrary-minimal';
-                    log('Audio resource created successfully with minimal arbitrary settings');
-                }
-            }
-            
-            log('Final audio resource details', {
-                method: resourceCreationMethod,
-                readable: resource.readable,
-                volume: resource.volume ? 'present' : 'missing',
-                metadata: resource.metadata,
-                playStreamType: typeof resource.playStream,
-                playStreamReadable: resource.playStream ? resource.playStream.readable : 'no playStream'
-            });
-            
-        } catch (finalError) {
-            log('All audio resource creation methods failed', { error: finalError.message, stack: finalError.stack });
-            if (textChannel) {
-                textChannel.send('❌ Failed to create audio resource. The stream URL may be incompatible or unavailable.').catch(console.error);
-            }
-            throw finalError;
-        }
 
+                request.setTimeout(15000, () => {
+                    request.destroy();
+                    reject(new Error('Request timed out after 15 seconds'));
+                });
+            });
+
+            resource = createAudioResource(stream, {
+                inputType: 'arbitrary',
+                inlineVolume: true,
+                metadata: {
+                    title: 'wTed Radio Stream',
+                    url: STREAM_URL
+                }
+            });
+
+            log('Audio resource created successfully from Node.js stream');
+
+        } catch (error) {
+            log('Failed to create audio resource from Node.js stream', { error: error.message, stack: error.stack });
+            if (textChannel) {
+                safeSendMessage(textChannel, `❌ Failed to create audio stream: ${error.message}. The radio service may be temporarily down.`);
+            }
+            performCleanup(guild, 'resource creation failed');
+            return; // Exit command since we couldn't create the resource
+        }
+        
         // Enhanced stream monitoring with detailed diagnostics
         let dataReceived = false;
         let firstDataTime = null;
@@ -344,23 +260,19 @@ async function connectToVoice(guild, textChannel) {
                 
                 if (voiceData.retryCount >= 5) {
                     log('Maximum retry attempts reached, performing automatic cleanup');
-                    if (textChannel) {
-                        textChannel.send('❌ Stream failed after 5 retry attempts. Automatically ending wTed Radio session.').catch(console.error);
-                    }
+                    safeSendMessage(textChannel, '❌ Stream failed after 5 retry attempts. Automatically ending wTed Radio session.');
                     
                     performCleanup(guild, 'max retries reached').then(() => {
-                        if (textChannel) {
-                            textChannel.send('🔄 wTed Radio session ended due to connection issues. Use `/wted play` to try again.').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '🔄 wTed Radio session ended due to connection issues. Use `/wted play` to try again.');
                     });
                     return;
                 }
                 
-                if (textChannel) {
-                    textChannel.send(`❌ Stream error: ${error.message}. Attempting to reconnect... (${voiceData.retryCount}/5)`).catch(console.error);
-                }
+                safeSendMessage(textChannel, `❌ Stream error: ${error.message}. Attempting to reconnect... (${voiceData.retryCount}/5)`);
                 
-                // Attempt to recreate the stream with a different method
+                // After a primary failure, we can fall back to the old method as a retry strategy.
+                // This gives us a chance to recover if the new method fails for some reason.
+                log('Falling back to FFmpeg URL method for retry');
                 setTimeout(() => {
                     if (voiceManager.has(guild.id)) {
                         log('Attempting to recreate stream after error', { 
@@ -369,48 +281,33 @@ async function connectToVoice(guild, textChannel) {
                         });
                         
                         try {
-                            // Try a different method for retry
-                            let retryResource;
-                            if (resourceCreationMethod === 'minimal-ffmpeg') {
-                                // Try URL input type (no FFmpeg args)
-                                retryResource = createAudioResource(STREAM_URL, {
-                                    inputType: 'url',
-                                    inlineVolume: true,
-                                    metadata: { title: 'wTed Radio Stream' }
-                                });
-                                log('Retry using URL input type (no FFmpeg)');
-                            } else {
-                                // Try minimal FFmpeg
-                                retryResource = createAudioResource(STREAM_URL, {
-                                    inputType: 'arbitrary',
-                                    inlineVolume: true,
-                                    metadata: { title: 'wTed Radio Stream' },
-                                    inputArgs: ['-reconnect', '1']
-                                });
-                                log('Retry using minimal FFmpeg settings');
-                            }
+                            const retryResource = createAudioResource(STREAM_URL, {
+                                inputType: 'arbitrary',
+                                inlineVolume: true,
+                                metadata: { title: 'wTed Radio Stream (Retry)' },
+                                inputArgs: [
+                                    '-reconnect', '1',
+                                    '-reconnect_streamed', '1',
+                                    '-reconnect_delay_max', '5'
+                                ]
+                            });
                             
                             const { player } = voiceManager.get(guild.id);
                             player.play(retryResource);
-                            log('Stream recreated successfully with alternative method');
+                            log('Fallback stream recreated successfully');
                             
-                            // Reset retry counter on successful reconnection
-                            voiceManager.get(guild.id).retryCount = 0;
+                            // Do NOT reset retry counter, let it cycle through attempts.
                             
-                            if (textChannel) {
-                                textChannel.send('✅ Stream reconnected successfully!').catch(console.error);
-                            }
+                            safeSendMessage(textChannel, `✅ Stream reconnected successfully! (Attempt ${voiceData.retryCount}/5)`);
                         } catch (recreateError) {
-                            log('Failed to recreate stream', { 
+                            log('Failed to recreate stream with fallback method', { 
                                 error: recreateError.message, 
                                 retryAttempt: voiceData.retryCount 
                             });
-                            if (textChannel) {
-                                textChannel.send(`❌ Failed to reconnect stream (attempt ${voiceData.retryCount}/5).`).catch(console.error);
-                            }
+                            safeSendMessage(textChannel, `❌ Failed to reconnect stream (attempt ${voiceData.retryCount}/5).`);
                         }
                     }
-                }, 5000); // Increased delay to 5 seconds
+                }, 5000); // 5-second delay before retrying
             }
         });
 
@@ -443,9 +340,7 @@ async function connectToVoice(guild, textChannel) {
                 totalBytesReceived: totalBytesReceived,
                 resourceMethod: resourceCreationMethod
             });
-            if (textChannel) {
-                textChannel.send('⚠️ Stream ended unexpectedly. This may indicate a connection issue.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '⚠️ Stream ended unexpectedly. This may indicate a connection issue.');
         });
 
         resource.playStream.on('close', () => {
@@ -454,9 +349,7 @@ async function connectToVoice(guild, textChannel) {
                 totalBytesReceived: totalBytesReceived,
                 resourceMethod: resourceCreationMethod
             });
-            if (textChannel) {
-                textChannel.send('⚠️ Stream connection closed.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '⚠️ Stream connection closed.');
         });
 
         resource.playStream.on('readable', () => {
@@ -470,9 +363,7 @@ async function connectToVoice(guild, textChannel) {
                     resourceMethod: resourceCreationMethod,
                     streamReadable: resource.playStream.readable
                 });
-                if (textChannel) {
-                    textChannel.send('⚠️ Stream startup timeout - no audio data received within 15 seconds. The stream may be unavailable.').catch(console.error);
-                }
+                safeSendMessage(textChannel, '⚠️ Stream startup timeout - no audio data received within 15 seconds. The stream may be unavailable.');
             }
         }, 15000);
 
@@ -518,27 +409,21 @@ async function connectToVoice(guild, textChannel) {
                 
                 voiceManager.delete(guild.id);
             }
-            if (textChannel) {
-                textChannel.send('❌ Voice connection encountered an error and stopped.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '❌ Voice connection encountered an error and stopped.');
         });
 
         // Check bot permissions for the voice channel (quick check)
         const botMember = guild.members.cache.get(guild.client.user.id);
         if (!botMember) {
             log('ERROR: Bot member not found in guild');
-            if (textChannel) {
-                textChannel.send('❌ Bot not found in server. Please re-invite the bot.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '❌ Bot not found in server. Please re-invite the bot.');
             return false;
         }
 
         const permissions = voiceChannel.permissionsFor(botMember);
         if (!permissions) {
             log('ERROR: Could not check permissions for voice channel');
-            if (textChannel) {
-                textChannel.send('❌ Could not verify bot permissions. Please check bot roles.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '❌ Could not verify bot permissions. Please check bot roles.');
             return false;
         }
 
@@ -549,9 +434,7 @@ async function connectToVoice(guild, textChannel) {
 
         if (!permissions.has('Connect') || !permissions.has('Speak')) {
             log('ERROR: Bot lacks required voice permissions');
-            if (textChannel) {
-                textChannel.send('❌ Bot lacks required permissions to connect or speak in the voice channel!').catch(console.error);
-            }
+            safeSendMessage(textChannel, '❌ Bot lacks required permissions to connect or speak in the voice channel!');
             return false;
         }
 
@@ -593,9 +476,7 @@ async function connectToVoice(guild, textChannel) {
             }
             
             // Notify in text channel
-            if (textChannel) {
-                textChannel.send('⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.').catch(console.error);
-            }
+            safeSendMessage(textChannel, '⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.');
         }, 3 * 60 * 60 * 1000); // 3 hours
 
         // Set up voice state update listener for this guild
@@ -627,14 +508,10 @@ async function connectToVoice(guild, textChannel) {
                     if (members.size > 0 && player.state.status === 'autopaused') {
                         log('Users joined, resuming player');
                         player.unpause();
-                        if (textChannel) {
-                            textChannel.send('▶️ wTed Radio resumed - welcome back!').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '▶️ wTed Radio resumed - welcome back!');
                     } else if (members.size === 0 && player.state.status === 'playing') {
                         log('All users left, player will auto-pause');
-                        if (textChannel) {
-                            textChannel.send('⏸️ wTed Radio paused - no users in voice channel.').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '⏸️ wTed Radio paused - no users in voice channel.');
                     }
                 }
             }
@@ -647,9 +524,7 @@ async function connectToVoice(guild, textChannel) {
         log('Voice manager entry created', { guildId: guild.id });
 
         // Send success message to text channel
-        if (textChannel) {
-            textChannel.send('🎵 wTed Radio is now live! Playing for 3 hours.').catch(console.error);
-        }
+        safeSendMessage(textChannel, '🎵 wTed Radio is now live! Playing for 3 hours.');
 
         // All diagnostic checks happen asynchronously (non-blocking)
         setImmediate(() => {
@@ -660,9 +535,7 @@ async function connectToVoice(guild, textChannel) {
                     const botMember = currentChannel.members.find(member => member.user.bot && member.user.id === guild.client.user.id);
                     if (botMember && (botMember.voice.selfDeaf || botMember.voice.deaf)) {
                         log('Bot is deafened in voice channel');
-                        if (textChannel) {
-                            textChannel.send('⚠️ Bot is deafened in voice channel. Right-click the bot and select "Undeafen" to hear audio.').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '⚠️ Bot is deafened in voice channel. Right-click the bot and select "Undeafen" to hear audio.');
                     }
                 }
             }, 3000);
@@ -686,9 +559,7 @@ async function connectToVoice(guild, textChannel) {
                     
                     req.on('error', (error) => {
                         log('Stream URL test error', { error: error.message });
-                        if (textChannel) {
-                            textChannel.send('❌ Stream URL is not accessible. Please check the stream.').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '❌ Stream URL is not accessible. Please check the stream.');
                     });
                     
                     req.setTimeout(5000, () => {
@@ -706,9 +577,7 @@ async function connectToVoice(guild, textChannel) {
         return true;
     } catch (error) {
         log('Error in voice connection', { error: error.message, stack: error.stack });
-        if (textChannel) {
-            textChannel.send('❌ Failed to connect to voice channel. Please try again.').catch(console.error);
-        }
+        safeSendMessage(textChannel, '❌ Failed to connect to voice channel. Please try again.');
         return false;
     }
 }
@@ -825,9 +694,7 @@ module.exports = {
                         await connectToVoice(guild, textChannel);
                     } catch (error) {
                         log('Error in async voice connection', { error: error.message });
-                        if (textChannel) {
-                            textChannel.send('❌ Failed to start wTed Radio. Please try again.').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '❌ Failed to start wTed Radio. Please try again.');
                     }
                 });
 
@@ -866,9 +733,7 @@ module.exports = {
                         if (success) {
                             // Send confirmation to text channel
                             const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
-                            if (textChannel) {
-                                textChannel.send('🛑 wTed Radio has been stopped by an admin.').catch(console.error);
-                            }
+                            safeSendMessage(textChannel, '🛑 wTed Radio has been stopped by an admin.');
                             log('Manual cleanup completed successfully');
                         } else {
                             log('No active session found to clean up');
@@ -877,9 +742,7 @@ module.exports = {
                     } catch (error) {
                         log('Error during manual cleanup', { error: error.message, stack: error.stack });
                         const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
-                        if (textChannel) {
-                            textChannel.send('⚠️ Error occurred while stopping. Bot may need manual disconnect.').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '⚠️ Error occurred while stopping. Bot may need manual disconnect.');
                     }
                 });
 
@@ -967,7 +830,7 @@ module.exports = {
                             // Notify in text channel
                             const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                             if (textChannel) {
-                                textChannel.send('⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.').catch(console.error);
+                                safeSendMessage(textChannel, '⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.');
                             }
                         }, 3 * 60 * 60 * 1000); // 3 hours
 
@@ -978,14 +841,14 @@ module.exports = {
                         // Send confirmation to text channel
                         const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                         if (textChannel) {
-                            textChannel.send('🔄 wTed Radio timer has been restarted for another 3 hours.').catch(console.error);
+                            safeSendMessage(textChannel, '🔄 wTed Radio timer has been restarted for another 3 hours.');
                         }
                         
                     } catch (error) {
                         log('Error during timer restart', { error: error.message, stack: error.stack });
                         const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                         if (textChannel) {
-                            textChannel.send('⚠️ Error occurred while restarting timer.').catch(console.error);
+                            safeSendMessage(textChannel, '⚠️ Error occurred while restarting timer.');
                         }
                     }
                 });
