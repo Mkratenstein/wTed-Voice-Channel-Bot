@@ -73,8 +73,8 @@ module.exports = {
                     return interaction.reply({ content: 'Could not find the specified voice channel.', flags: [4096] });
                 }
 
-                // Reply immediately
-                await interaction.reply({ content: 'Starting the wTed radio bot...', flags: [4096] });
+                // Defer the reply to give us more time
+                await interaction.deferReply({ ephemeral: true });
 
                 try {
                     log('Attempting to join voice channel');
@@ -130,12 +130,12 @@ module.exports = {
                     voiceManager.set(guild.id, { connection, player, timer });
                     log('Voice manager entry created', { guildId: guild.id });
 
-                    // Send a follow-up message
-                    await interaction.followUp({ content: 'Successfully connected to voice channel!', flags: [4096] });
+                    // Edit the deferred reply
+                    await interaction.editReply({ content: 'Successfully connected to voice channel!', flags: [4096] });
 
                 } catch (error) {
                     log('Error during voice setup', { error: error.message });
-                    await interaction.followUp({ content: 'Failed to connect to voice channel. Please try again.', flags: [4096] });
+                    await interaction.editReply({ content: 'Failed to connect to voice channel. Please try again.', flags: [4096] });
                 }
 
             } else if (subcommand === 'end') {
@@ -155,8 +155,8 @@ module.exports = {
                     return interaction.reply({ content: 'The bot is not currently playing.', flags: [4096] });
                 }
 
-                // Reply immediately
-                await interaction.reply({ content: 'Stopping the wTed radio bot...', flags: [4096] });
+                // Defer the reply
+                await interaction.deferReply({ ephemeral: true });
 
                 log('Stopping bot and cleaning up resources');
                 const { connection, timer } = voiceManager.get(guild.id);
@@ -164,7 +164,7 @@ module.exports = {
                 connection.destroy();
                 voiceManager.delete(guild.id);
 
-                await interaction.followUp({ content: 'The wTed bot has been stopped.', flags: [4096] });
+                await interaction.editReply({ content: 'The wTed bot has been stopped.', flags: [4096] });
 
             } else if (subcommand === 'restart') {
                 log('Restart command executed', {
@@ -183,8 +183,8 @@ module.exports = {
                     return interaction.reply({ content: 'The bot is not currently playing.', flags: [4096] });
                 }
 
-                // Reply immediately
-                await interaction.reply({ content: 'Restarting the timer...', flags: [4096] });
+                // Defer the reply
+                await interaction.deferReply({ ephemeral: true });
 
                 log('Restarting timer');
                 const { timer } = voiceManager.get(guild.id);
@@ -199,7 +199,7 @@ module.exports = {
 
                 voiceManager.get(guild.id).timer = newTimer;
 
-                await interaction.followUp({ content: 'The timer has been restarted for 3 hours.', flags: [4096] });
+                await interaction.editReply({ content: 'The timer has been restarted for 3 hours.', flags: [4096] });
                 const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
                 if (textChannel) {
                     await textChannel.send('The wTed bot timer has been restarted for another 3 hours.');
@@ -208,10 +208,10 @@ module.exports = {
         } catch (error) {
             log('Error in wted command', { error: error.message, stack: error.stack });
             try {
-                if (!interaction.replied) {
+                if (!interaction.deferred && !interaction.replied) {
                     await interaction.reply({ content: 'There was an error executing this command.', flags: [4096] });
-                } else {
-                    await interaction.followUp({ content: 'There was an error executing this command.', flags: [4096] });
+                } else if (interaction.deferred) {
+                    await interaction.editReply({ content: 'There was an error executing this command.', flags: [4096] });
                 }
             } catch (replyError) {
                 log('Error sending error message', { error: replyError.message });
