@@ -44,7 +44,7 @@ if (missingVariables) {
 
 // Log loaded config, obscuring the token
 const loggedConfig = { ...config, DISCORD_TOKEN: '********' };
-log('Configuration loaded successfully:', loggedConfig);
+log('Configuration loaded successfully.');
 
 
 module.exports = config; 
