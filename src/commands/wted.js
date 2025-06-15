@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { log } = require('../utils/logger');
 const config = require('../utils/config');
 const { connectAndPlay, disconnect, voiceManager, safeSendMessage } = require('../voiceManager');
@@ -14,11 +14,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('end')
-                .setDescription('Stops the radio and disconnects the bot (Admin only).'))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('restart')
-                .setDescription('Restarts the bot connection (Admin only).')),
+                .setDescription('Stops the radio and disconnects the bot (Admin only).')),
     
     async execute(interaction) {
         const { guild, member, client } = interaction;
@@ -27,7 +23,7 @@ module.exports = {
         log(`Command received: /wted ${subcommand}`, { user: member.user.tag, guild: guild.name });
 
         // Defer the reply to avoid timeout, and make it public.
-        await interaction.deferReply({ ephemeral: false });
+        await interaction.deferReply();
 
         try {
             if (subcommand === 'play') {
@@ -37,7 +33,7 @@ module.exports = {
                 }
 
                 if (voiceManager.has(guild.id)) {
-                    return interaction.editReply({ content: '🎵 The bot is already playing!' });
+                    return interaction.editReply({ content: '�� The bot is already playing!' });
                 }
 
                 await interaction.editReply({ content: `▶️ **${member.displayName}** started wTed Radio!` });
@@ -56,26 +52,6 @@ module.exports = {
                 disconnect(interaction.guild, true); // Mark as an intentional disconnect
                 await interaction.editReply({ content: `⏹️ **${member.displayName}** stopped the radio.` });
 
-            } else if (subcommand === 'restart') {
-                if (!member.roles.cache.has(config.ADMIN_ROLE_ID)) {
-                    log('Permission denied for /wted restart', { userId: member.id });
-                    return interaction.editReply({ content: '❌ You do not have the required role to use this command (Admin only).' });
-                }
-                
-                await interaction.editReply({ content: `🔄 **${member.displayName}** is restarting the radio...` });
-
-                if (voiceManager.has(guild.id)) {
-                    disconnect(guild, true); // Mark as intentional to prevent idle message
-                }
-                
-                // Wait a moment for full disconnect before reconnecting
-                setTimeout(() => {
-                    log('Restarting: Reconnecting...');
-                    connectAndPlay(guild).catch(err => {
-                        log('Restart command failed during reconnect', { error: err.message });
-                        safeSendMessage(client, '❌ Restart failed. Please use `/wted play` to start the bot.');
-                    });
-                }, 2000);
             }
         } catch (error) {
             log('An error occurred during command execution.', { error: error.message, stack: error.stack });

@@ -44,9 +44,10 @@ async function safeSendMessage(client, message) {
  * Creates and verifies an audio stream from the STREAM_URL.
  * This function is critical to ensure we don't join and play silence.
  * @param {import('discord.js').Client} client The Discord client.
+ * @param {import('discord.js').Guild} guild The guild object.
  * @returns {Promise<import('@discordjs/voice').AudioResource>}
  */
-function createVerifiedAudioResource(client) {
+function createVerifiedAudioResource(client, guild) {
     return new Promise((resolve, reject) => {
         icy.get(config.STREAM_URL, (res) => {
             // Log icy headers
@@ -55,10 +56,36 @@ function createVerifiedAudioResource(client) {
             // Listen for metadata changes
             res.on('metadata', (metadata) => {
                 const parsedMetadata = icy.parse(metadata);
-                if (parsedMetadata && parsedMetadata.StreamTitle) {
-                    log('New metadata received:', parsedMetadata);
-                    updateBotActivity(client, parsedMetadata.StreamTitle);
+                if (!parsedMetadata || !parsedMetadata.StreamTitle) return;
+
+                const session = voiceManager.get(guild.id);
+                // Do nothing if the title hasn't changed
+                if (session && session.lastStreamTitle === parsedMetadata.StreamTitle) {
+                    return;
                 }
+
+                if (session) {
+                    session.lastStreamTitle = parsedMetadata.StreamTitle;
+                }
+
+                log('New metadata received:', parsedMetadata);
+                updateBotActivity(client, parsedMetadata.StreamTitle);
+
+                const streamTitle = parsedMetadata.StreamTitle;
+                const parts = streamTitle.split(' - ');
+                let songDetails;
+
+                if (parts.length >= 3) {
+                    const artist = parts[0].trim();
+                    const song = parts[1].trim();
+                    const album = parts.slice(2).join(' - ').trim();
+                    songDetails = `🎵  **Now Playing:** ${song} by **${artist}**\n💿  **From:** ${album}`;
+                } else {
+                    songDetails = `🎵  **Now Playing:** ${streamTitle}`;
+                }
+
+                const message = `**Now Playing from wTed:**\n${songDetails}`;
+                safeSendMessage(client, message);
             });
 
             // Handle the audio stream
@@ -111,7 +138,7 @@ async function connectAndPlay(guild) {
     try {
         // 1. Create and verify the audio resource BEFORE joining the channel
         await safeSendMessage(client, '📻 Accessing wTed Radio stream...');
-        const resource = await createVerifiedAudioResource(client);
+        const resource = await createVerifiedAudioResource(client, guild);
         log('Audio stream verified successfully.');
         await safeSendMessage(client, '✅ Stream verified. Connecting to voice...');
 
@@ -130,7 +157,8 @@ async function connectAndPlay(guild) {
             connection,
             player: null,
             subscription: null,
-            intentionalDisconnect: false
+            intentionalDisconnect: false,
+            lastStreamTitle: null
         });
 
         // 3. Set up connection state handling
@@ -225,7 +253,15 @@ function disconnect(guild, intentional = false) {
         return;
     }
 
-    const { connection, player, subscription, client } = session;
+    const { connection, player, subscription } = session;
+
+    if (intentional) {
+        log('Intentional disconnect: Removing player listeners to prevent auto-reconnect.');
+        if (player) {
+            player.removeAllListeners();
+        }
+        session.intentionalDisconnect = true;
+    }
 
     log('Disconnecting and cleaning up resources.');
 
