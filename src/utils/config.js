@@ -24,6 +24,11 @@ const config = {
     TESTING_MODE: process.env.TESTING_MODE === 'true',
 };
 
+// Data Sanitization: Trim whitespace and remove any trailing semicolons from the stream URL.
+if (config.STREAM_URL) {
+    config.STREAM_URL = config.STREAM_URL.trim().replace(/;$/, '');
+}
+
 let missingVariables = false;
 for (const variable of requiredVariables) {
     if (!config[variable]) {
