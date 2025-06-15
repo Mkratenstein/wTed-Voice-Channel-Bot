@@ -65,7 +65,7 @@ module.exports = {
                 await interaction.editReply({ content: `🔄 **${member.displayName}** is restarting the radio...` });
 
                 if (voiceManager.has(guild.id)) {
-                    disconnect(guild, false); // Not fully intentional, we want it to come back
+                    disconnect(guild, true); // Mark as intentional to prevent idle message
                 }
                 
                 // Wait a moment for full disconnect before reconnecting
