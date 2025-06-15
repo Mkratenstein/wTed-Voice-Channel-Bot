@@ -46,6 +46,8 @@ async function connectToVoice(guild, textChannel) {
             channelId: voiceChannel.id,
             guildId: guild.id,
             adapterCreator: guild.voiceAdapterCreator,
+            selfDeaf: false,
+            selfMute: false,
         });
 
         log('Voice connection established');
@@ -72,6 +74,31 @@ async function connectToVoice(guild, textChannel) {
                             totalChannelMembers: currentChannel.members.size,
                             allMembers: currentChannel.members.map(m => ({ name: m.user.username, isBot: m.user.bot }))
                         });
+                        
+                        // Check if bot is deafened or muted
+                        if (botMember) {
+                            log('Bot voice state', {
+                                deaf: botMember.voice.deaf,
+                                mute: botMember.voice.mute,
+                                selfDeaf: botMember.voice.selfDeaf,
+                                selfMute: botMember.voice.selfMute
+                            });
+                            
+                            // Try to undeafen/unmute if needed
+                            if (botMember.voice.selfDeaf || botMember.voice.selfMute) {
+                                log('Bot is deafened/muted, attempting to fix');
+                                try {
+                                    botMember.voice.setDeaf(false);
+                                    botMember.voice.setMute(false);
+                                    log('Successfully undeafened/unmuted bot');
+                                } catch (error) {
+                                    log('Failed to undeafen/unmute bot', { error: error.message });
+                                    if (textChannel) {
+                                        textChannel.send('⚠️ Bot is deafened in voice channel. Please right-click the bot and select "Undeafen" to hear audio.').catch(console.error);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }, 1000);
             }
