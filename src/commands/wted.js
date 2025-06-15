@@ -9,10 +9,19 @@ const {
 } = require('@discordjs/voice');
 const https = require('https');
 const { GUILD_ID, USER_ROLE_ID, ADMIN_ROLE_ID, VOICE_CHANNEL_ID, TEXT_CHANNEL_ID, ACTIVE_TEXT_CHANNEL_ID, STREAM_URL, TESTING_MODE } = require('../config');
-const { log } = require('../utils/log');
 
 // Store active connections and timers
 const voiceManager = new Map();
+
+// Enhanced logging function
+function log(message, data = null) {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}`;
+    console.log(logMessage);
+    if (data) {
+        console.log(JSON.stringify(data, null, 2));
+    }
+}
 
 // Safe Discord message sending function for testing
 function safeSendMessage(textChannel, message) {
