@@ -7,11 +7,20 @@ const {
     VoiceConnectionStatus,
     entersState
 } = require('@discordjs/voice');
-const https = require('https');
+const icy = require('icy');
 const { log } = require('./utils/logger');
 const config = require('./utils/config');
 
 const voiceManager = new Map();
+
+/**
+ * Updates the bot's activity with the currently playing song.
+ * @param {import('discord.js').Client} client The Discord client.
+ * @param {string} songTitle The title of the song.
+ */
+function updateBotActivity(client, songTitle) {
+    client.user.setActivity(songTitle, { type: 'LISTENING' });
+}
 
 /**
  * Sends a message to the designated text channel safely.
@@ -34,23 +43,27 @@ async function safeSendMessage(client, message) {
 /**
  * Creates and verifies an audio stream from the STREAM_URL.
  * This function is critical to ensure we don't join and play silence.
+ * @param {import('discord.js').Client} client The Discord client.
  * @returns {Promise<import('@discordjs/voice').AudioResource>}
  */
-function createVerifiedAudioResource() {
+function createVerifiedAudioResource(client) {
     return new Promise((resolve, reject) => {
-        const request = https.get(config.STREAM_URL, (response) => {
-            // Follow redirects
-            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                https.get(response.headers.location, (redirectResponse) => {
-                    handleStream(redirectResponse, resolve, reject);
-                }).on('error', (err) => reject(new Error(`Stream redirect error: ${err.message}`)));
-                return;
-            }
-            handleStream(response, resolve, reject);
-        });
+        icy.get(config.STREAM_URL, (res) => {
+            // Log icy headers
+            log('ICY Headers:', res.headers);
 
-        request.on('error', (err) => reject(new Error(`Stream request error: ${err.message}`)));
-        request.end();
+            // Listen for metadata changes
+            res.on('metadata', (metadata) => {
+                const parsedMetadata = icy.parse(metadata);
+                if (parsedMetadata && parsedMetadata.StreamTitle) {
+                    log('New metadata received:', parsedMetadata);
+                    updateBotActivity(client, parsedMetadata.StreamTitle);
+                }
+            });
+
+            // Handle the audio stream
+            handleStream(res, resolve, reject);
+        }).on('error', (err) => reject(new Error(`Stream request error: ${err.message}`)));
     });
 }
 
@@ -81,7 +94,6 @@ function handleStream(stream, resolve, reject) {
     });
 }
 
-
 /**
  * Connects to the voice channel, creates a player, and starts streaming.
  * @param {import('discord.js').Guild} guild The guild to connect in.
@@ -99,9 +111,12 @@ async function connectAndPlay(guild) {
     try {
         // 1. Create and verify the audio resource BEFORE joining the channel
         await safeSendMessage(client, '📻 Accessing wTed Radio stream...');
-        const resource = await createVerifiedAudioResource();
+        const resource = await createVerifiedAudioResource(client);
         log('Audio stream verified successfully.');
         await safeSendMessage(client, '✅ Stream verified. Connecting to voice...');
+
+        // Set initial bot activity
+        updateBotActivity(client, 'wTed Radio');
 
         // 2. Join the voice channel
         connection = joinVoiceChannel({
@@ -162,6 +177,8 @@ async function connectAndPlay(guild) {
                 
                 // Disconnect gracefully but don't immediately give up.
                 disconnect(guild, false); // Pass false to allow potential reconnect
+
+                // Retry connection after a short delay.
                 setTimeout(() => {
                     log('Retrying connection...');
                     connectAndPlay(guild).catch(err => {
@@ -171,6 +188,8 @@ async function connectAndPlay(guild) {
                 }, 5000); // 5-second delay before reconnecting
             } else {
                 log('Audio player is Idle due to an intentional disconnect. Not reconnecting.');
+                // No need to send a message to the channel for intentional disconnects
+                updateBotActivity(client, 'Offline');
             }
         });
 
@@ -206,11 +225,7 @@ function disconnect(guild, intentional = false) {
         return;
     }
 
-    if (intentional) {
-        session.intentionalDisconnect = true;
-    }
-
-    const { connection, player, subscription } = session;
+    const { connection, player, subscription, client } = session;
 
     log('Disconnecting and cleaning up resources.');
 
@@ -222,6 +237,11 @@ function disconnect(guild, intentional = false) {
     }
     if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
         connection.destroy();
+    }
+
+    // Clear bot activity on disconnect
+    if (player && player.client) {
+        updateBotActivity(player.client, 'Offline');
     }
 
     voiceManager.delete(guild.id);
