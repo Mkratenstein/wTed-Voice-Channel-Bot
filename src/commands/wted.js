@@ -32,21 +32,21 @@ module.exports = {
 
         if (subcommand === 'play') {
             if (!member.roles.cache.has(USER_ROLE_ID)) {
-                return interaction.reply({ content: 'You do not have the required role to use this command.', ephemeral: true });
+                return interaction.reply({ content: 'You do not have the required role to use this command.', flags: [4096] });
             }
 
             if (voiceManager.has(guild.id)) {
-                return interaction.reply({ content: 'The bot is already playing.', ephemeral: true });
+                return interaction.reply({ content: 'The bot is already playing.', flags: [4096] });
             }
 
             const voiceChannel = await guild.channels.fetch(VOICE_CHANNEL_ID);
             const textChannel = await guild.channels.fetch(TEXT_CHANNEL_ID);
 
             if (!voiceChannel || !voiceChannel.isVoiceBased()) {
-                return interaction.reply({ content: 'Could not find the specified voice channel.', ephemeral: true });
+                return interaction.reply({ content: 'Could not find the specified voice channel.', flags: [4096] });
             }
 
-            await interaction.reply({ content: 'Starting the wTed radio bot...', ephemeral: true });
+            await interaction.reply({ content: 'Starting the wTed radio bot...', flags: [4096] });
 
             const connection = joinVoiceChannel({
                 channelId: voiceChannel.id,
@@ -95,11 +95,11 @@ module.exports = {
 
         } else if (subcommand === 'end') {
             if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                return interaction.reply({ content: 'You do not have the required role to use this command.', ephemeral: true });
+                return interaction.reply({ content: 'You do not have the required role to use this command.', flags: [4096] });
             }
 
             if (!voiceManager.has(guild.id)) {
-                return interaction.reply({ content: 'The bot is not currently playing.', ephemeral: true });
+                return interaction.reply({ content: 'The bot is not currently playing.', flags: [4096] });
             }
 
             const { connection, timer } = voiceManager.get(guild.id);
@@ -107,15 +107,15 @@ module.exports = {
             connection.destroy();
             voiceManager.delete(guild.id);
 
-            return interaction.reply({ content: 'The wTed bot has been stopped.', ephemeral: true });
+            return interaction.reply({ content: 'The wTed bot has been stopped.', flags: [4096] });
 
         } else if (subcommand === 'restart') {
             if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                return interaction.reply({ content: 'You do not have the required role to use this command.', ephemeral: true });
+                return interaction.reply({ content: 'You do not have the required role to use this command.', flags: [4096] });
             }
 
             if (!voiceManager.has(guild.id)) {
-                return interaction.reply({ content: 'The bot is not currently playing.', ephemeral: true });
+                return interaction.reply({ content: 'The bot is not currently playing.', flags: [4096] });
             }
             
             const textChannel = await guild.channels.fetch(TEXT_CHANNEL_ID);
@@ -133,7 +133,7 @@ module.exports = {
 
             voiceManager.get(guild.id).timer = newTimer;
 
-            await interaction.reply({ content: 'The timer has been restarted for 3 hours.', ephemeral: true });
+            await interaction.reply({ content: 'The timer has been restarted for 3 hours.', flags: [4096] });
             await textChannel.send('The wTed bot timer has been restarted for another 3 hours.');
         }
     },
