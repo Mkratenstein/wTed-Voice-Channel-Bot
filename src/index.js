@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits, MessageFlags } = require('discord.js');
 const { log } = require('./utils/logger');
 const config = require('./utils/config');
 const { deployCommands } = require('./deploy-commands');
@@ -46,7 +46,17 @@ client.once(Events.ClientReady, c => {
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isChatInputCommand()) return;
+    // DIAGNOSTIC: Log every interaction received
+    log('Interaction received', { 
+        type: interaction.type, 
+        commandName: interaction.isCommand() ? interaction.commandName : 'N/A',
+        user: interaction.user.tag,
+    });
+
+    if (!interaction.isChatInputCommand()) {
+        log('Interaction was not a chat command, skipping further processing.');
+        return;
+    }
 
     const command = interaction.client.commands.get(interaction.commandName);
 
@@ -60,9 +70,9 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (error) {
         log('Error executing command', { command: interaction.commandName, error: error.message, stack: error.stack });
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
+            await interaction.followUp({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
         } else {
-            await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+            await interaction.reply({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
         }
     }
 });

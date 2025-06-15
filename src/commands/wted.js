@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { log } = require('../utils/logger');
 const config = require('../utils/config');
 const { connectAndPlay, disconnect, voiceManager, safeSendMessage } = require('../voiceManager');
@@ -27,7 +27,7 @@ module.exports = {
         log(`Command received: /wted ${subcommand}`, { user: member.user.tag, guild: guild.name });
 
         // Use ephemeral reply to acknowledge the command immediately
-        await interaction.reply({ content: 'Processing your request...', ephemeral: true });
+        await interaction.reply({ content: 'Processing your request...', flags: MessageFlags.Ephemeral });
 
         try {
             if (subcommand === 'play') {
