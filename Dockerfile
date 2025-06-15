@@ -1,27 +1,27 @@
-FROM node:18-alpine
+FROM node:18-slim
 
-# Explicitly set the Python path for node-gyp. This is a common fix for Alpine.
-ENV PYTHON=/usr/bin/python3
+# Install necessary dependencies using Debian's package manager.
+# build-essential includes the C/C++ compiler and related tools.
+# --no-install-recommends keeps the image smaller.
+# We clean up the apt cache at the end to reduce image size.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    build-essential \
+    python3 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install FFmpeg for audio and build-tools for native module compilation.
-# The .build-deps is a virtual package that lets us uninstall all build tools easily later.
-RUN apk add --no-cache ffmpeg && \
-    apk add --no-cache --virtual .build-deps build-base python3
-
-# Create app directory
+# Set the working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package configuration
 COPY package.json ./
 
-# Install dependencies. This will use the build tools for @discordjs/opus.
+# Install dependencies. This will now succeed in the Debian environment.
 RUN npm install --only=production --no-optional
 
-# Remove the build dependencies now that we're done with them.
-RUN apk del .build-deps
-
-# Copy app source
+# Copy the rest of the application source code
 COPY . .
 
-# Start the bot
+# Command to run the bot
 CMD ["npm", "start"]
