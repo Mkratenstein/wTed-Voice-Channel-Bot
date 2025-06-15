@@ -26,8 +26,14 @@ module.exports = {
         
         log(`Command received: /wted ${subcommand}`, { user: member.user.tag, guild: guild.name });
 
-        // Use ephemeral reply to acknowledge the command immediately
-        await interaction.reply({ content: 'Processing your request...', flags: MessageFlags.Ephemeral });
+        try {
+            // Use ephemeral reply to acknowledge the command immediately
+            await interaction.reply({ content: 'Processing your request...', flags: MessageFlags.Ephemeral });
+        } catch (replyError) {
+            log('Failed to send initial reply. The interaction may have already timed out or been deleted.', { error: replyError.message });
+            // If we can't reply, we can't do anything else.
+            return;
+        }
 
         try {
             if (subcommand === 'play') {
@@ -86,7 +92,16 @@ module.exports = {
             }
         } catch (error) {
             log('An error occurred during command execution.', { error: error.message, stack: error.stack });
-            await interaction.editReply({ content: '🔥 An unexpected error occurred. Please check the logs.' });
+            // Don't try to reply again if the initial reply failed.
+            if (!interaction.replied && !interaction.deferred) {
+                // This block should ideally not be reached if the above check is solid.
+                return;
+            }
+            try {
+                await interaction.editReply({ content: '🔥 An unexpected error occurred. Please check the logs.' });
+            } catch (editError) {
+                log('Failed to send error feedback to user.', { error: editError.message });
+            }
         }
     },
 }; 
