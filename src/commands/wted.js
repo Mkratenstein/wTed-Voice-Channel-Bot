@@ -670,66 +670,62 @@ module.exports = {
 
         try {
             if (subcommand === 'play') {
-                // IMMEDIATE response - absolutely first thing
-                await interaction.reply({ 
-                    content: '🔄 Checking permissions and starting wTed Radio...', 
-                    flags: [4096] 
-                });
-
-                // Check permissions after response
+                // Check permissions FIRST before any Discord API calls
                 if (!member.roles.cache.has(USER_ROLE_ID)) {
-                    return interaction.editReply({ 
-                        content: '❌ You do not have the required role to use this command.'
+                    return interaction.reply({ 
+                        content: '❌ You do not have the required role to use this command.',
+                        ephemeral: true
                     });
                 }
 
                 if (voiceManager.has(guild.id)) {
-                    return interaction.editReply({ 
-                        content: '🎵 The bot is already playing!'
+                    return interaction.reply({ 
+                        content: '🎵 The bot is already playing!',
+                        ephemeral: true
                     });
                 }
 
-                // Update status
-                await interaction.editReply({ 
-                    content: '🔄 Starting wTed Radio...'
+                // IMMEDIATE response - absolutely first thing after checks
+                await interaction.reply({ 
+                    content: '🔄 Starting wTed Radio...',
+                    ephemeral: true
                 });
 
                 // Get text channel for updates (using test channel if provided)
                 const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
 
-                // Handle ALL voice operations asynchronously
+                // Handle ALL voice operations completely asynchronously - no await
                 setImmediate(async () => {
                     try {
+                        log('Starting async voice connection process');
                         await connectToVoice(guild, textChannel);
+                        log('Voice connection process completed successfully');
                     } catch (error) {
-                        log('Error in async voice connection', { error: error.message });
+                        log('Error in async voice connection', { error: error.message, stack: error.stack });
                         safeSendMessage(textChannel, '❌ Failed to start wTed Radio. Please try again.');
                     }
                 });
 
             } else if (subcommand === 'end') {
-                // IMMEDIATE response - absolutely first thing
-                await interaction.reply({ 
-                    content: '🛑 Checking permissions and stopping wTed Radio...', 
-                    flags: [4096] 
-                });
-
-                // Check permissions after response
+                // Check permissions FIRST before any Discord API calls
                 if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                    return interaction.editReply({ 
-                        content: '❌ You do not have the required role to use this command.'
+                    return interaction.reply({ 
+                        content: '❌ You do not have the required role to use this command.',
+                        ephemeral: true
                     });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.editReply({ 
-                        content: '❌ The bot is not currently playing.'
+                    return interaction.reply({ 
+                        content: '❌ The bot is not currently playing.',
+                        ephemeral: true
                     });
                 }
 
-                // Update status
-                await interaction.editReply({ 
-                    content: '🛑 Stopping wTed Radio...'
+                // IMMEDIATE response - absolutely first thing after checks
+                await interaction.reply({ 
+                    content: '🛑 Stopping wTed Radio...',
+                    ephemeral: true
                 });
 
                 // Perform cleanup asynchronously to avoid interaction timeouts
@@ -756,28 +752,25 @@ module.exports = {
                 });
 
             } else if (subcommand === 'restart') {
-                // IMMEDIATE response - absolutely first thing
-                await interaction.reply({ 
-                    content: '🔄 Checking permissions and restarting timer...', 
-                    flags: [4096] 
-                });
-
-                // Check permissions after response
+                // Check permissions FIRST before any Discord API calls
                 if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                    return interaction.editReply({ 
-                        content: '❌ You do not have the required role to use this command.'
+                    return interaction.reply({ 
+                        content: '❌ You do not have the required role to use this command.',
+                        ephemeral: true
                     });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.editReply({ 
-                        content: '❌ The bot is not currently playing.'
+                    return interaction.reply({ 
+                        content: '❌ The bot is not currently playing.',
+                        ephemeral: true
                     });
                 }
 
-                // Update status
-                await interaction.editReply({ 
-                    content: '🔄 Restarting timer...'
+                // IMMEDIATE response - absolutely first thing after checks
+                await interaction.reply({ 
+                    content: '🔄 Restarting timer...',
+                    ephemeral: true
                 });
 
                 // Restart the timer asynchronously
@@ -871,7 +864,7 @@ module.exports = {
                 if (!interaction.replied && !interaction.deferred) {
                     await interaction.reply({ 
                         content: '❌ An error occurred while executing this command.', 
-                        flags: [4096] 
+                        ephemeral: true
                     });
                 } else {
                     await interaction.editReply({ 
