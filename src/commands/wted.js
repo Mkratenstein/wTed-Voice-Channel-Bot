@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
-const { GUILD_ID, USER_ROLE_ID, ADMIN_ROLE_ID, VOICE_CHANNEL_ID, TEXT_CHANNEL_ID, ACTIVE_TEXT_CHANNEL_ID, STREAM_URL } = require('../config');
+const { GUILD_ID, USER_ROLE_ID, ADMIN_ROLE_ID, VOICE_CHANNEL_ID, TEXT_CHANNEL_ID, ACTIVE_TEXT_CHANNEL_ID, STREAM_URL, TESTING_MODE } = require('../config');
 
 // Store active connections and timers
 const voiceManager = new Map();
@@ -13,6 +13,22 @@ function log(message, data = null) {
     if (data) {
         console.log(JSON.stringify(data, null, 2));
     }
+}
+
+// Safe Discord message sending function for testing
+function safeSendMessage(textChannel, message) {
+    if (TESTING_MODE) {
+        log(`[DISCORD MESSAGE DISABLED] ${message}`);
+        return Promise.resolve();
+    }
+    
+    if (textChannel) {
+        return textChannel.send(message).catch(error => {
+            log('Failed to send Discord message', { error: error.message, message });
+        });
+    }
+    
+    return Promise.resolve();
 }
 
 // Async function to handle voice connection
@@ -37,9 +53,7 @@ async function connectToVoice(guild, textChannel) {
 
         if (members.size === 0) {
             log('Warning: No users currently in voice channel');
-            if (textChannel) {
-                textChannel.send('⚠️ Starting wTed Radio, but no users are currently in the voice channel. Join the channel to hear the stream!').catch(console.error);
-            }
+            safeSendMessage(textChannel, '⚠️ Starting wTed Radio, but no users are currently in the voice channel. Join the channel to hear the stream!');
         }
 
         const connection = joinVoiceChannel({
@@ -62,9 +76,7 @@ async function connectToVoice(guild, textChannel) {
             // Handle connection failures
             if (newState.status === 'disconnected') {
                 log('Connection disconnected', { reason: newState.reason });
-                if (textChannel) {
-                    textChannel.send('❌ Voice connection was disconnected. Please try again.').catch(console.error);
-                }
+                safeSendMessage(textChannel, '❌ Voice connection was disconnected. Please try again.');
             }
         });
 
@@ -97,9 +109,7 @@ async function connectToVoice(guild, textChannel) {
                         player.unpause();
                     } else {
                         log('No users in voice channel, keeping paused');
-                        if (textChannel) {
-                            textChannel.send('⏸️ wTed Radio paused - no users in voice channel. Join the voice channel to resume!').catch(console.error);
-                        }
+                        safeSendMessage(textChannel, '⏸️ wTed Radio paused - no users in voice channel. Join the voice channel to resume!');
                     }
                 }
             }
@@ -107,17 +117,13 @@ async function connectToVoice(guild, textChannel) {
             // Handle when player resumes
             if (oldState.status === 'autopaused' && newState.status === 'playing') {
                 log('Player resumed from autopaused state');
-                if (textChannel) {
-                    textChannel.send('▶️ wTed Radio resumed - welcome back!').catch(console.error);
-                }
+                safeSendMessage(textChannel, '▶️ wTed Radio resumed - welcome back!');
             }
             
             // Handle idle state (might indicate stream ended or failed)
             if (newState.status === 'idle' && oldState.status !== 'idle') {
                 log('Player went idle - stream may have ended or failed');
-                if (textChannel) {
-                    textChannel.send('⚠️ Audio stream stopped. Attempting to restart...').catch(console.error);
-                }
+                safeSendMessage(textChannel, '⚠️ Audio stream stopped. Attempting to restart...');
                 
                 // Try to restart the stream
                 setTimeout(() => {
@@ -244,9 +250,9 @@ async function connectToVoice(guild, textChannel) {
         try {
             log('Creating audio resource with radio-optimized settings');
             
-            // Method 1: Try with specific radio stream settings
+            // Method 1: Try with minimal FFmpeg arguments (most compatible)
             try {
-                log('Attempt 1: Creating resource with radio-specific FFmpeg args');
+                log('Attempt 1: Creating resource with minimal FFmpeg args for maximum compatibility');
                 resource = createAudioResource(STREAM_URL, {
                     inputType: 'arbitrary',
                     inlineVolume: true,
@@ -254,18 +260,14 @@ async function connectToVoice(guild, textChannel) {
                         title: 'wTed Radio Stream',
                         url: STREAM_URL
                     },
-                    // Radio-specific FFmpeg arguments
+                    // Minimal FFmpeg arguments for radio streams
                     inputArgs: [
                         '-reconnect', '1',
-                        '-reconnect_streamed', '1',
-                        '-reconnect_delay_max', '5',
-                        '-user_agent', 'wTed-Discord-Bot/1.0',
-                        '-headers', 'Icy-MetaData: 1',
-                        '-f', 'mp3'
+                        '-reconnect_streamed', '1'
                     ]
                 });
-                resourceCreationMethod = 'radio-optimized';
-                log('Audio resource created successfully with radio-optimized settings');
+                resourceCreationMethod = 'minimal-ffmpeg';
+                log('Audio resource created successfully with minimal FFmpeg settings');
             } catch (error1) {
                 log('Radio-optimized creation failed, trying basic URL method', { error: error1.message });
                 
@@ -369,23 +371,23 @@ async function connectToVoice(guild, textChannel) {
                         try {
                             // Try a different method for retry
                             let retryResource;
-                            if (resourceCreationMethod === 'radio-optimized') {
-                                // Try URL input type
+                            if (resourceCreationMethod === 'minimal-ffmpeg') {
+                                // Try URL input type (no FFmpeg args)
                                 retryResource = createAudioResource(STREAM_URL, {
                                     inputType: 'url',
                                     inlineVolume: true,
                                     metadata: { title: 'wTed Radio Stream' }
                                 });
-                                log('Retry using URL input type');
+                                log('Retry using URL input type (no FFmpeg)');
                             } else {
-                                // Try radio-optimized
+                                // Try minimal FFmpeg
                                 retryResource = createAudioResource(STREAM_URL, {
                                     inputType: 'arbitrary',
                                     inlineVolume: true,
                                     metadata: { title: 'wTed Radio Stream' },
-                                    inputArgs: ['-reconnect', '1', '-reconnect_streamed', '1']
+                                    inputArgs: ['-reconnect', '1']
                                 });
-                                log('Retry using radio-optimized settings');
+                                log('Retry using minimal FFmpeg settings');
                             }
                             
                             const { player } = voiceManager.get(guild.id);
@@ -422,9 +424,7 @@ async function connectToVoice(guild, textChannel) {
                     resourceMethod: resourceCreationMethod,
                     timeToFirstData: firstDataTime - Date.now()
                 });
-                if (textChannel) {
-                    textChannel.send('✅ Stream data flowing - audio should be working!').catch(console.error);
-                }
+                safeSendMessage(textChannel, '✅ Stream data flowing - audio should be working!');
             }
             totalBytesReceived += chunk.length;
             

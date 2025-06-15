@@ -32,10 +32,11 @@ module.exports = {
     VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID,
     TEXT_CHANNEL_ID: process.env.TEXT_CHANNEL_ID,
     STREAM_URL: process.env.STREAM_URL,
-    // FORCE TEST CHANNEL for testing - override with test channel ID
-    ACTIVE_TEXT_CHANNEL_ID: '1383827890696753162' // Test channel - hardcoded for testing
+    // TESTING MODE - disable Discord messages to focus on audio debugging
+    ACTIVE_TEXT_CHANNEL_ID: null, // Disable Discord messages during testing
+    TESTING_MODE: true // Enable testing mode
 };
 
-// Log which channel configuration is being used
-console.log(`[CONFIG] FORCED TEST MODE: All bot messages will go to test channel: 1383827890696753162`);
-console.log(`[CONFIG] Production channel (${process.env.TEXT_CHANNEL_ID}) will NOT receive messages during testing`); 
+// Log testing mode configuration
+console.log(`[CONFIG] TESTING MODE ENABLED: Discord messages disabled - using console logs only`);
+console.log(`[CONFIG] This prevents permission errors and focuses on audio stream debugging`); 
