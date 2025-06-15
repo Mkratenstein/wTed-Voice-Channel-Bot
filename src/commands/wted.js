@@ -75,7 +75,8 @@ async function connectToVoice(guild, textChannel) {
         player.on('stateChange', (oldState, newState) => {
             log('Player state changed', { 
                 from: oldState.status, 
-                to: newState.status 
+                to: newState.status,
+                resource: newState.resource ? 'present' : 'missing'
             });
             
             // Handle autopaused state
@@ -110,20 +111,59 @@ async function connectToVoice(guild, textChannel) {
                     textChannel.send('▶️ wTed Radio resumed - welcome back!').catch(console.error);
                 }
             }
+            
+            // Handle idle state (might indicate stream ended or failed)
+            if (newState.status === 'idle' && oldState.status !== 'idle') {
+                log('Player went idle - stream may have ended or failed');
+                if (textChannel) {
+                    textChannel.send('⚠️ Audio stream stopped. Attempting to restart...').catch(console.error);
+                }
+                
+                // Try to restart the stream
+                setTimeout(() => {
+                    if (voiceManager.has(guild.id)) {
+                        try {
+                            const newResource = createAudioResource(STREAM_URL, {
+                                inputType: 'arbitrary',
+                                inlineVolume: true,
+                                metadata: { title: 'wTed Radio Stream' }
+                            });
+                            player.play(newResource);
+                            log('Attempted to restart audio stream');
+                        } catch (error) {
+                            log('Failed to restart audio stream', { error: error.message });
+                        }
+                    }
+                }, 1000);
+            }
         });
 
         // Set up error handling for player
         player.on('error', error => {
             log('Audio player error', { error: error.message, stack: error.stack });
             if (voiceManager.has(guild.id)) {
-                const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
+                const { connection, subscription, voiceStateHandler, player } = voiceManager.get(guild.id);
+                
+                // Stop the player
+                if (player) {
+                    player.stop();
+                }
+                
+                // Clean up subscription
                 if (subscription) {
                     subscription.unsubscribe();
                 }
+                
+                // Remove voice state handler
                 if (voiceStateHandler) {
                     guild.client.off('voiceStateUpdate', voiceStateHandler);
                 }
-                connection.destroy();
+                
+                // Destroy connection
+                if (connection) {
+                    connection.destroy();
+                }
+                
                 voiceManager.delete(guild.id);
             }
             if (textChannel) {
@@ -140,9 +180,13 @@ async function connectToVoice(guild, textChannel) {
             }
         });
 
-        log('Audio resource created successfully');
+        log('Audio resource created successfully', {
+            readable: resource.readable,
+            volume: resource.volume ? 'present' : 'missing',
+            metadata: resource.metadata
+        });
 
-        // Add resource error handling
+        // Add detailed resource error handling
         resource.playStream.on('error', error => {
             log('Stream error', { error: error.message, stack: error.stack });
             if (textChannel) {
@@ -150,26 +194,61 @@ async function connectToVoice(guild, textChannel) {
             }
         });
 
+        // Monitor stream events (async, non-blocking)
+        setImmediate(() => {
+            resource.playStream.on('end', () => {
+                log('Stream ended');
+            });
+
+            resource.playStream.on('close', () => {
+                log('Stream closed');
+            });
+
+            resource.playStream.on('readable', () => {
+                log('Stream is readable');
+            });
+        });
+
         // Subscribe the connection to the player
         const subscription = connection.subscribe(player);
-        log('Connection subscribed to player', { subscribed: !!subscription });
+        log('Connection subscribed to player', { 
+            subscribed: !!subscription,
+            subscriptionId: subscription ? 'present' : 'missing'
+        });
 
         // Play the resource
         player.play(resource);
-        log('Audio player started playing resource');
+        log('Audio player started playing resource', {
+            playerState: player.state.status,
+            resourceAttached: !!player.state.resource
+        });
 
         // Set up error handling
         connection.on('error', error => {
             log('Voice connection error', { error: error.message, stack: error.stack });
             if (voiceManager.has(guild.id)) {
-                const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
+                const { connection, subscription, voiceStateHandler, player } = voiceManager.get(guild.id);
+                
+                // Stop the player
+                if (player) {
+                    player.stop();
+                }
+                
+                // Clean up subscription
                 if (subscription) {
                     subscription.unsubscribe();
                 }
+                
+                // Remove voice state handler
                 if (voiceStateHandler) {
                     guild.client.off('voiceStateUpdate', voiceStateHandler);
                 }
-                connection.destroy();
+                
+                // Destroy connection
+                if (connection) {
+                    connection.destroy();
+                }
+                
                 voiceManager.delete(guild.id);
             }
             if (textChannel) {
@@ -213,23 +292,44 @@ async function connectToVoice(guild, textChannel) {
         const timer = setTimeout(() => {
             log('Timer expired, disconnecting bot');
             if (voiceManager.has(guild.id)) {
-                const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
+                const { connection, subscription, voiceStateHandler, player } = voiceManager.get(guild.id);
+                
+                log('Starting automatic cleanup after timer expiration');
+                
+                // Stop the player first
+                if (player) {
+                    player.stop();
+                    log('Player stopped due to timer expiration');
+                }
+                
+                // Clean up subscription
                 if (subscription) {
                     subscription.unsubscribe();
+                    log('Subscription cleaned up');
                 }
+                
+                // Remove voice state handler
                 if (voiceStateHandler) {
                     guild.client.off('voiceStateUpdate', voiceStateHandler);
+                    log('Voice state handler removed');
                 }
-                connection.destroy();
+                
+                // Destroy connection (this removes bot from voice channel)
+                if (connection) {
+                    connection.destroy();
+                    log('Voice connection destroyed - bot should leave channel');
+                }
+                
+                // Clean up voice manager
                 voiceManager.delete(guild.id);
+                log('Voice manager cleaned up');
             }
+            
+            // Notify in text channel
             if (textChannel) {
-                textChannel.send('⏰ wTed bot 3-hour session has ended. Use `/wted play` to start again.').catch(console.error);
+                textChannel.send('⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.').catch(console.error);
             }
-        }, 3 * 60 * 60 * 1000);
-
-        voiceManager.set(guild.id, { connection, player, timer, subscription });
-        log('Voice manager entry created', { guildId: guild.id });
+        }, 3 * 60 * 60 * 1000); // 3 hours
 
         // Set up voice state update listener for this guild
         const client = guild.client;
@@ -275,27 +375,66 @@ async function connectToVoice(guild, textChannel) {
         
         client.on('voiceStateUpdate', voiceStateHandler);
         
-        // Store the handler so we can remove it later
-        voiceManager.get(guild.id).voiceStateHandler = voiceStateHandler;
+        // Store all data in voice manager including the handler
+        voiceManager.set(guild.id, { connection, player, timer, subscription, voiceStateHandler });
+        log('Voice manager entry created', { guildId: guild.id });
 
         // Send success message to text channel
         if (textChannel) {
             textChannel.send('🎵 wTed Radio is now live! Playing for 3 hours.').catch(console.error);
         }
 
-        // Check for deafen status after a delay (non-blocking)
-        setTimeout(() => {
-            const currentChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
-            if (currentChannel) {
-                const botMember = currentChannel.members.find(member => member.user.bot && member.user.id === guild.client.user.id);
-                if (botMember && (botMember.voice.selfDeaf || botMember.voice.deaf)) {
-                    log('Bot is deafened in voice channel');
-                    if (textChannel) {
-                        textChannel.send('⚠️ Bot is deafened in voice channel. Right-click the bot and select "Undeafen" to hear audio.').catch(console.error);
+        // All diagnostic checks happen asynchronously (non-blocking)
+        setImmediate(() => {
+            // Check for deafen status after a delay
+            setTimeout(() => {
+                const currentChannel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+                if (currentChannel) {
+                    const botMember = currentChannel.members.find(member => member.user.bot && member.user.id === guild.client.user.id);
+                    if (botMember && (botMember.voice.selfDeaf || botMember.voice.deaf)) {
+                        log('Bot is deafened in voice channel');
+                        if (textChannel) {
+                            textChannel.send('⚠️ Bot is deafened in voice channel. Right-click the bot and select "Undeafen" to hear audio.').catch(console.error);
+                        }
                     }
                 }
-            }
-        }, 3000);
+            }, 3000);
+
+            // Test stream URL accessibility
+            setTimeout(() => {
+                log('Testing stream URL accessibility');
+                const https = require('https');
+                const url = require('url');
+                
+                try {
+                    const parsedUrl = url.parse(STREAM_URL);
+                    const req = https.request(parsedUrl, (res) => {
+                        log('Stream URL test response', { 
+                            statusCode: res.statusCode, 
+                            contentType: res.headers['content-type'],
+                            icyName: res.headers['icy-name']
+                        });
+                        req.destroy();
+                    });
+                    
+                    req.on('error', (error) => {
+                        log('Stream URL test error', { error: error.message });
+                        if (textChannel) {
+                            textChannel.send('❌ Stream URL is not accessible. Please check the stream.').catch(console.error);
+                        }
+                    });
+                    
+                    req.setTimeout(5000, () => {
+                        log('Stream URL test timeout');
+                        req.destroy();
+                    });
+                    
+                    req.end();
+                } catch (error) {
+                    log('Error testing stream URL', { error: error.message });
+                }
+            }, 2000);
+        });
 
         return true;
     } catch (error) {
@@ -395,23 +534,63 @@ module.exports = {
                     flags: [4096] 
                 });
 
-                // Clean up resources
-                const { connection, timer, subscription, voiceStateHandler } = voiceManager.get(guild.id);
-                clearTimeout(timer);
-                if (subscription) {
-                    subscription.unsubscribe();
-                }
-                if (voiceStateHandler) {
-                    guild.client.off('voiceStateUpdate', voiceStateHandler);
-                }
-                connection.destroy();
-                voiceManager.delete(guild.id);
+                // Perform cleanup asynchronously to avoid interaction timeouts
+                setImmediate(() => {
+                    try {
+                        log('Starting cleanup process for /wted end');
+                        
+                        const { connection, timer, subscription, voiceStateHandler, player } = voiceManager.get(guild.id);
+                        
+                        // Stop the timer
+                        if (timer) {
+                            clearTimeout(timer);
+                            log('Timer cleared');
+                        }
+                        
+                        // Stop the audio player
+                        if (player) {
+                            player.stop();
+                            log('Audio player stopped');
+                        }
+                        
+                        // Unsubscribe from the connection
+                        if (subscription) {
+                            subscription.unsubscribe();
+                            log('Subscription unsubscribed');
+                        }
+                        
+                        // Remove voice state handler
+                        if (voiceStateHandler) {
+                            guild.client.off('voiceStateUpdate', voiceStateHandler);
+                            log('Voice state handler removed');
+                        }
+                        
+                        // Destroy the voice connection (this removes bot from channel)
+                        if (connection) {
+                            connection.destroy();
+                            log('Voice connection destroyed');
+                        }
+                        
+                        // Remove from voice manager
+                        voiceManager.delete(guild.id);
+                        log('Removed from voice manager');
 
-                // Send confirmation to text channel
-                const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
-                if (textChannel) {
-                    textChannel.send('🛑 wTed Radio has been stopped by an admin.').catch(console.error);
-                }
+                        // Send confirmation to text channel
+                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        if (textChannel) {
+                            textChannel.send('🛑 wTed Radio has been stopped by an admin.').catch(console.error);
+                        }
+                        
+                        log('Cleanup process completed successfully');
+                        
+                    } catch (error) {
+                        log('Error during cleanup', { error: error.message, stack: error.stack });
+                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        if (textChannel) {
+                            textChannel.send('⚠️ Error occurred while stopping. Bot may need manual disconnect.').catch(console.error);
+                        }
+                    }
+                });
 
             } else if (subcommand === 'restart') {
                 // Check permissions first
@@ -435,35 +614,87 @@ module.exports = {
                     flags: [4096] 
                 });
 
-                // Restart the timer
-                const { timer } = voiceManager.get(guild.id);
-                clearTimeout(timer);
-                const newTimer = setTimeout(() => {
-                    log('Timer expired, disconnecting bot');
-                    if (voiceManager.has(guild.id)) {
-                        const { connection, subscription, voiceStateHandler } = voiceManager.get(guild.id);
-                        if (subscription) {
-                            subscription.unsubscribe();
+                // Restart the timer asynchronously
+                setImmediate(() => {
+                    try {
+                        log('Restarting 3-hour timer');
+                        
+                        const voiceData = voiceManager.get(guild.id);
+                        if (!voiceData) {
+                            log('No voice data found for restart');
+                            return;
                         }
-                        if (voiceStateHandler) {
-                            guild.client.off('voiceStateUpdate', voiceStateHandler);
+                        
+                        const { timer } = voiceData;
+                        
+                        // Clear the existing timer
+                        if (timer) {
+                            clearTimeout(timer);
+                            log('Previous timer cleared');
                         }
-                        connection.destroy();
-                        voiceManager.delete(guild.id);
-                    }
-                    const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
-                    if (textChannel) {
-                        textChannel.send('⏰ wTed bot 3-hour session has ended. Use `/wted play` to start again.').catch(console.error);
-                    }
-                }, 3 * 60 * 60 * 1000);
+                        
+                        // Create new 3-hour timer
+                        const newTimer = setTimeout(() => {
+                            log('Timer expired after restart, disconnecting bot');
+                            if (voiceManager.has(guild.id)) {
+                                const { connection, subscription, voiceStateHandler, player } = voiceManager.get(guild.id);
+                                
+                                log('Starting automatic cleanup after timer expiration');
+                                
+                                // Stop the player first
+                                if (player) {
+                                    player.stop();
+                                    log('Player stopped due to timer expiration');
+                                }
+                                
+                                // Clean up subscription
+                                if (subscription) {
+                                    subscription.unsubscribe();
+                                    log('Subscription cleaned up');
+                                }
+                                
+                                // Remove voice state handler
+                                if (voiceStateHandler) {
+                                    guild.client.off('voiceStateUpdate', voiceStateHandler);
+                                    log('Voice state handler removed');
+                                }
+                                
+                                // Destroy connection (this removes bot from voice channel)
+                                if (connection) {
+                                    connection.destroy();
+                                    log('Voice connection destroyed - bot should leave channel');
+                                }
+                                
+                                // Clean up voice manager
+                                voiceManager.delete(guild.id);
+                                log('Voice manager cleaned up');
+                            }
+                            
+                            // Notify in text channel
+                            const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                            if (textChannel) {
+                                textChannel.send('⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.').catch(console.error);
+                            }
+                        }, 3 * 60 * 60 * 1000); // 3 hours
 
-                voiceManager.get(guild.id).timer = newTimer;
+                        // Update the timer in voice manager
+                        voiceManager.get(guild.id).timer = newTimer;
+                        log('New 3-hour timer set');
 
-                // Send confirmation to text channel
-                const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
-                if (textChannel) {
-                    textChannel.send('🔄 wTed Radio timer has been restarted for another 3 hours.').catch(console.error);
-                }
+                        // Send confirmation to text channel
+                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        if (textChannel) {
+                            textChannel.send('🔄 wTed Radio timer has been restarted for another 3 hours.').catch(console.error);
+                        }
+                        
+                    } catch (error) {
+                        log('Error during timer restart', { error: error.message, stack: error.stack });
+                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        if (textChannel) {
+                            textChannel.send('⚠️ Error occurred while restarting timer.').catch(console.error);
+                        }
+                    }
+                });
             }
 
         } catch (error) {
