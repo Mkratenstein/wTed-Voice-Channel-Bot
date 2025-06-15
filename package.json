@@ -26,6 +26,9 @@
     "sodium": "^3.0.2",
     "node-gyp": "^10.0.1"
   },
+  "devDependencies": {
+    "node-gyp": "^10.0.1"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
@@ -34,5 +37,6 @@
   ],
   "cpu": [
     "x64"
-  ]
+  ],
+  "gypfile": true
 } 
