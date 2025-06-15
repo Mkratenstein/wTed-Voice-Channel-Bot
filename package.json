@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "deploy-commands": "node src/deploy-commands.js"
+    "deploy": "node src/deploy-commands.js",
+    "dev": "nodemon src/index.js"
   },
   "keywords": [
     "discord",
@@ -21,5 +22,8 @@
     "dotenv": "^16.4.5",
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.13"
+  },
+  "engines": {
+    "node": ">=16.9.0"
   }
 } 
