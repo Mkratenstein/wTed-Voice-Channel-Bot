@@ -2,6 +2,7 @@ require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const { deployCommands } = require('./deploy-commands');
 
 const client = new Client({
     intents: [
@@ -49,8 +50,15 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`Ready! Logged in as ${client.user.tag}`);
+    try {
+        console.log('Deploying commands...');
+        await deployCommands();
+        console.log('Commands deployed successfully!');
+    } catch (error) {
+        console.error('Error deploying commands:', error);
+    }
 });
 
 client.login(process.env.DISCORD_TOKEN); 
