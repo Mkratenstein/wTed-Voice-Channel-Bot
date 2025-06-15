@@ -179,7 +179,23 @@ async function connectToVoice(guild, textChannel) {
 
         // Check bot permissions for the voice channel (quick check)
         const botMember = guild.members.cache.get(guild.client.user.id);
+        if (!botMember) {
+            log('ERROR: Bot member not found in guild');
+            if (textChannel) {
+                textChannel.send('❌ Bot not found in server. Please re-invite the bot.').catch(console.error);
+            }
+            return false;
+        }
+
         const permissions = voiceChannel.permissionsFor(botMember);
+        if (!permissions) {
+            log('ERROR: Could not check permissions for voice channel');
+            if (textChannel) {
+                textChannel.send('❌ Could not verify bot permissions. Please check bot roles.').catch(console.error);
+            }
+            return false;
+        }
+
         log('Bot voice channel permissions', {
             connect: permissions.has('Connect'),
             speak: permissions.has('Speak')
@@ -281,39 +297,6 @@ async function connectToVoice(guild, textChannel) {
             }
         }, 3000);
 
-        // Test the stream URL
-        log('Testing stream URL accessibility');
-        try {
-            const https = require('https');
-            const http = require('http');
-            const url = require('url');
-            
-            const parsedUrl = url.parse(STREAM_URL);
-            const protocol = parsedUrl.protocol === 'https:' ? https : http;
-            
-            const req = protocol.request(parsedUrl, (res) => {
-                log('Stream URL test response', { 
-                    statusCode: res.statusCode, 
-                    headers: res.headers,
-                    contentType: res.headers['content-type']
-                });
-                req.destroy();
-            });
-            
-            req.on('error', (error) => {
-                log('Stream URL test error', { error: error.message });
-            });
-            
-            req.setTimeout(5000, () => {
-                log('Stream URL test timeout');
-                req.destroy();
-            });
-            
-            req.end();
-        } catch (error) {
-            log('Error testing stream URL', { error: error.message });
-        }
-
         return true;
     } catch (error) {
         log('Error in voice connection', { error: error.message, stack: error.stack });
@@ -369,7 +352,7 @@ module.exports = {
                     });
                 }
 
-                // Respond immediately
+                // Respond immediately - no voice operations before this
                 await interaction.reply({ 
                     content: '🔄 Starting wTed Radio...', 
                     flags: [4096] 
@@ -378,9 +361,16 @@ module.exports = {
                 // Get text channel for updates
                 const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
 
-                // Handle voice connection asynchronously
+                // Handle ALL voice operations asynchronously
                 setImmediate(async () => {
-                    await connectToVoice(guild, textChannel);
+                    try {
+                        await connectToVoice(guild, textChannel);
+                    } catch (error) {
+                        log('Error in async voice connection', { error: error.message });
+                        if (textChannel) {
+                            textChannel.send('❌ Failed to start wTed Radio. Please try again.').catch(console.error);
+                        }
+                    }
                 });
 
             } else if (subcommand === 'end') {
