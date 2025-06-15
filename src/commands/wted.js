@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const { USER_ROLE_ID, ADMIN_ROLE_ID, VOICE_CHANNEL_ID, TEXT_CHANNEL_ID, STREAM_URL } = require('../config');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
+const { GUILD_ID, USER_ROLE_ID, ADMIN_ROLE_ID, VOICE_CHANNEL_ID, TEXT_CHANNEL_ID, ACTIVE_TEXT_CHANNEL_ID, STREAM_URL } = require('../config');
 
 // Store active connections and timers
 const voiceManager = new Map();
@@ -706,29 +706,32 @@ module.exports = {
 
         try {
             if (subcommand === 'play') {
-                // Check permissions first
+                // IMMEDIATE response - absolutely first thing
+                await interaction.reply({ 
+                    content: '🔄 Checking permissions and starting wTed Radio...', 
+                    flags: [4096] 
+                });
+
+                // Check permissions after response
                 if (!member.roles.cache.has(USER_ROLE_ID)) {
-                    return interaction.reply({ 
-                        content: '❌ You do not have the required role to use this command.', 
-                        flags: [4096] 
+                    return interaction.editReply({ 
+                        content: '❌ You do not have the required role to use this command.'
                     });
                 }
 
                 if (voiceManager.has(guild.id)) {
-                    return interaction.reply({ 
-                        content: '🎵 The bot is already playing!', 
-                        flags: [4096] 
+                    return interaction.editReply({ 
+                        content: '🎵 The bot is already playing!'
                     });
                 }
 
-                // Respond immediately - no voice operations before this
-                await interaction.reply({ 
-                    content: '🔄 Starting wTed Radio...', 
-                    flags: [4096] 
+                // Update status
+                await interaction.editReply({ 
+                    content: '🔄 Starting wTed Radio...'
                 });
 
-                // Get text channel for updates
-                const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                // Get text channel for updates (using test channel if provided)
+                const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
 
                 // Handle ALL voice operations asynchronously
                 setImmediate(async () => {
@@ -743,25 +746,28 @@ module.exports = {
                 });
 
             } else if (subcommand === 'end') {
-                // Check permissions first
+                // IMMEDIATE response - absolutely first thing
+                await interaction.reply({ 
+                    content: '🛑 Checking permissions and stopping wTed Radio...', 
+                    flags: [4096] 
+                });
+
+                // Check permissions after response
                 if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                    return interaction.reply({ 
-                        content: '❌ You do not have the required role to use this command.', 
-                        flags: [4096] 
+                    return interaction.editReply({ 
+                        content: '❌ You do not have the required role to use this command.'
                     });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.reply({ 
-                        content: '❌ The bot is not currently playing.', 
-                        flags: [4096] 
+                    return interaction.editReply({ 
+                        content: '❌ The bot is not currently playing.'
                     });
                 }
 
-                // Respond immediately
-                await interaction.reply({ 
-                    content: '🛑 Stopping wTed Radio...', 
-                    flags: [4096] 
+                // Update status
+                await interaction.editReply({ 
+                    content: '🛑 Stopping wTed Radio...'
                 });
 
                 // Perform cleanup asynchronously to avoid interaction timeouts
@@ -773,7 +779,7 @@ module.exports = {
                         
                         if (success) {
                             // Send confirmation to text channel
-                            const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                            const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                             if (textChannel) {
                                 textChannel.send('🛑 wTed Radio has been stopped by an admin.').catch(console.error);
                             }
@@ -784,7 +790,7 @@ module.exports = {
                         
                     } catch (error) {
                         log('Error during manual cleanup', { error: error.message, stack: error.stack });
-                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                         if (textChannel) {
                             textChannel.send('⚠️ Error occurred while stopping. Bot may need manual disconnect.').catch(console.error);
                         }
@@ -792,25 +798,28 @@ module.exports = {
                 });
 
             } else if (subcommand === 'restart') {
-                // Check permissions first
+                // IMMEDIATE response - absolutely first thing
+                await interaction.reply({ 
+                    content: '🔄 Checking permissions and restarting timer...', 
+                    flags: [4096] 
+                });
+
+                // Check permissions after response
                 if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-                    return interaction.reply({ 
-                        content: '❌ You do not have the required role to use this command.', 
-                        flags: [4096] 
+                    return interaction.editReply({ 
+                        content: '❌ You do not have the required role to use this command.'
                     });
                 }
 
                 if (!voiceManager.has(guild.id)) {
-                    return interaction.reply({ 
-                        content: '❌ The bot is not currently playing.', 
-                        flags: [4096] 
+                    return interaction.editReply({ 
+                        content: '❌ The bot is not currently playing.'
                     });
                 }
 
-                // Respond immediately
-                await interaction.reply({ 
-                    content: '🔄 Restarting timer...', 
-                    flags: [4096] 
+                // Update status
+                await interaction.editReply({ 
+                    content: '🔄 Restarting timer...'
                 });
 
                 // Restart the timer asynchronously
@@ -870,7 +879,7 @@ module.exports = {
                             }
                             
                             // Notify in text channel
-                            const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                            const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                             if (textChannel) {
                                 textChannel.send('⏰ wTed bot 3-hour session has ended. The bot has left the voice channel. Use `/wted play` to start again.').catch(console.error);
                             }
@@ -881,14 +890,14 @@ module.exports = {
                         log('New 3-hour timer set');
 
                         // Send confirmation to text channel
-                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                         if (textChannel) {
                             textChannel.send('🔄 wTed Radio timer has been restarted for another 3 hours.').catch(console.error);
                         }
                         
                     } catch (error) {
                         log('Error during timer restart', { error: error.message, stack: error.stack });
-                        const textChannel = guild.channels.cache.get(TEXT_CHANNEL_ID);
+                        const textChannel = guild.channels.cache.get(ACTIVE_TEXT_CHANNEL_ID);
                         if (textChannel) {
                             textChannel.send('⚠️ Error occurred while restarting timer.').catch(console.error);
                         }
@@ -901,10 +910,14 @@ module.exports = {
             
             // Try to respond with error
             try {
-                if (!interaction.replied) {
+                if (!interaction.replied && !interaction.deferred) {
                     await interaction.reply({ 
                         content: '❌ An error occurred while executing this command.', 
                         flags: [4096] 
+                    });
+                } else {
+                    await interaction.editReply({ 
+                        content: '❌ An error occurred while executing this command.'
                     });
                 }
             } catch (replyError) {

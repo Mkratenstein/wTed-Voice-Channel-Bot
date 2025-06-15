@@ -10,6 +10,11 @@ const requiredEnvVars = [
     'STREAM_URL'
 ];
 
+// Optional environment variables
+const optionalEnvVars = [
+    'TEST_CHANNEL_ID'
+];
+
 // Check for missing environment variables
 const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 if (missingEnvVars.length > 0) {
@@ -26,5 +31,7 @@ module.exports = {
     ADMIN_ROLE_ID: process.env.ADMIN_ROLE_ID,
     VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID,
     TEXT_CHANNEL_ID: process.env.TEXT_CHANNEL_ID,
-    STREAM_URL: process.env.STREAM_URL
+    STREAM_URL: process.env.STREAM_URL,
+    // Use TEST_CHANNEL_ID if provided, otherwise fall back to TEXT_CHANNEL_ID
+    ACTIVE_TEXT_CHANNEL_ID: process.env.TEST_CHANNEL_ID || process.env.TEXT_CHANNEL_ID
 }; 
